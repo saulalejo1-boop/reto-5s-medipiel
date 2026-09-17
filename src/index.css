@@ -966,19 +966,39 @@ button {
     gap: 6px;
   }
   .decor-pill-1 {
-    top: 32px;
-    right: 42px;
+    top: 28px;
+    right: 36px;
   }
-  .decor-pill-2 {
-    bottom: 32px;
-    left: 42px;
-  }
+}
+
+.modal-5s-banner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: rgba(1, 96, 109, 0.05);
+  border: 1px solid rgba(1, 96, 109, 0.12);
+  border-radius: var(--radius-full);
+  padding: 6px 18px;
+  margin: 0 auto;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: var(--petrol);
+}
+
+.modal-5s-banner .dot {
+  color: var(--turquoise);
+  font-size: 0.75rem;
 }
 
 .onboarding-overlay .modal-card {
   z-index: 1;
   box-shadow: 0 20px 60px rgba(1, 96, 109, 0.14), 0 4px 16px rgba(0, 0, 0, 0.04) !important;
   border: 1px solid rgba(1, 96, 109, 0.12);
+  padding: 26px 30px;
 }
 
 .modal-card {

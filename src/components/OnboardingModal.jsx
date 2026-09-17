@@ -111,13 +111,10 @@ export function OnboardingModal() {
           <circle cx="210" cy="580" r="4" fill="#01606D" fillOpacity="0.25" />
         </svg>
 
-        {/* Sellos discretos en las esquinas */}
+        {/* Sello discreto superior */}
         <div className="decor-pill decor-pill-1">
           <Sparkles size={13} color="var(--turquoise-hover)" />
           <span>Cultura Medipiel</span>
-        </div>
-        <div className="decor-pill decor-pill-2">
-          <span>Ser · Servir · Saber · Sonreír · Sorprender</span>
         </div>
       </div>
 
@@ -165,18 +162,31 @@ export function OnboardingModal() {
         )}
 
         {/* Modal Header */}
-        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '18px' }}>
           <img
             src="/medipiel-logo.png"
             alt="Medipiel"
-            style={{ height: '48px', width: 'auto', marginBottom: '12px' }}
+            style={{ height: '42px', width: 'auto', marginBottom: '10px' }}
           />
-          <h2 style={{ fontSize: '1.6rem', color: 'var(--petrol)', marginBottom: '6px' }}>
+          <h2 style={{ fontSize: '1.5rem', color: 'var(--petrol)', marginBottom: '4px' }}>
             {isExistingUser ? 'Mi Perfil Reto 5S' : '¡Bienvenido(a) al Reto 5S!'}
           </h2>
-          <p style={{ color: 'var(--gray-600)', fontSize: '0.92rem', maxWidth: '420px', margin: '0 auto' }}>
+          <p style={{ color: 'var(--gray-600)', fontSize: '0.88rem', maxWidth: '420px', margin: '0 auto 12px auto', lineHeight: '1.4' }}>
             30 días para vivir nuestra cultura mediante acciones prácticas que se ven, se sienten y se repiten.
           </p>
+
+          {/* Píldora destacada de las 5S integrada en la tarjeta */}
+          <div className="modal-5s-banner">
+            <span>Ser</span>
+            <span className="dot">•</span>
+            <span>Servir</span>
+            <span className="dot">•</span>
+            <span>Saber</span>
+            <span className="dot">•</span>
+            <span>Sonreír</span>
+            <span className="dot">•</span>
+            <span>Sorprender</span>
+          </div>
         </div>
 
         {/* Selector de modo si no hay sesión activa y hay perfiles guardados */}
@@ -440,7 +450,7 @@ export function OnboardingModal() {
                 <textarea
                   id="input-intencion"
                   className="form-textarea"
-                  rows={3}
+                  rows={2}
                   placeholder="Ej. Conectar genuinamente con mis compañeros, escuchar con empatía a cada cliente y aportar el 1% extra cada día."
                   value={intencion}
                   onChange={(e) => setIntencion(e.target.value)}
