@@ -47,29 +47,25 @@ export function Header() {
           {syncStatus === 'saving' ? (
             <>
               <RefreshCw size={13} className="sync-dot pulse" />
-              <span>Guardando...</span>
+              <span className="sync-text">Guardando...</span>
             </>
           ) : syncStatus === 'synced' ? (
             <>
               <span className="sync-dot"></span>
-              <span>Sincronizado</span>
+              <span className="sync-text">Sincronizado</span>
             </>
           ) : (
             <>
               <span className="sync-dot" style={{ backgroundColor: '#F59E0B' }}></span>
-              <span>Modo Local</span>
+              <span className="sync-text">Modo Local</span>
             </>
           )}
         </button>
 
         {/* Botón Acceso Administrador */}
         <button
-          className="btn btn-outline btn-sm"
+          className={`btn btn-outline btn-sm header-admin-btn ${activeTab === 'admin' ? 'active-admin' : ''}`}
           style={{
-            padding: '6px 12px',
-            borderRadius: '9999px',
-            fontSize: '0.82rem',
-            gap: '5px',
             color: activeTab === 'admin' ? 'var(--white)' : 'var(--petrol)',
             background: activeTab === 'admin' ? 'var(--petrol)' : 'transparent',
             borderColor: activeTab === 'admin' ? 'var(--petrol)' : 'var(--gray-300)'
@@ -83,32 +79,23 @@ export function Header() {
 
         {/* User Card Pill */}
         <button
-          className="btn btn-outline btn-sm"
-          style={{ padding: '6px 14px', borderRadius: '9999px', fontSize: '0.82rem', gap: '6px' }}
+          className="btn btn-outline btn-sm header-user-btn"
           onClick={() => setIsOnboardingOpen(true)}
           title="Editar perfil o tienda"
         >
           <User size={14} />
-          <span>{isUserLoggedIn ? participant.nombre.split(' ')[0] : 'Ingresar'}</span>
+          <span className="header-user-name">{isUserLoggedIn ? participant.nombre.split(' ')[0] : 'Ingresar'}</span>
         </button>
 
         {/* Botón Salir / Cerrar Sesión */}
         {isUserLoggedIn && (
           <button
-            className="btn btn-outline btn-sm"
-            style={{
-              padding: '6px 12px',
-              borderRadius: '9999px',
-              fontSize: '0.82rem',
-              gap: '6px',
-              color: 'var(--gray-600)',
-              borderColor: 'var(--gray-300)'
-            }}
+            className="btn btn-outline btn-sm header-logout-btn"
             onClick={handleLogout}
             title="Cerrar sesión / Salir"
           >
             <LogOut size={14} />
-            <span>Salir</span>
+            <span className="header-logout-text">Salir</span>
           </button>
         )}
       </div>

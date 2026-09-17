@@ -453,6 +453,77 @@ button {
   50% { transform: scale(1.4); opacity: 0.5; }
 }
 
+/* Responsive Mobile App Header */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0 10px;
+    height: 58px;
+  }
+
+  .header-mobile-brand {
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .header-mobile-logo {
+    height: 26px;
+  }
+
+  .header-title-text {
+    font-size: 0.88rem;
+  }
+
+  .header-actions {
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  /* En móvil: mostrar indicador compacto para que todo quepa en una sola línea */
+  .sync-indicator {
+    padding: 5px 8px;
+    font-size: 0.72rem;
+  }
+
+  .sync-indicator .sync-text {
+    display: none;
+  }
+
+  .header-admin-btn {
+    padding: 4px 8px !important;
+    font-size: 0.75rem !important;
+    border-radius: var(--radius-full) !important;
+    gap: 4px !important;
+  }
+
+  .header-user-btn {
+    padding: 4px 8px !important;
+    font-size: 0.75rem !important;
+    border-radius: var(--radius-full) !important;
+    gap: 4px !important;
+    max-width: 85px !important;
+  }
+
+  .header-user-name {
+    display: inline-block;
+    max-width: 55px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .header-logout-btn {
+    padding: 4px 7px !important;
+    font-size: 0.75rem !important;
+    border-radius: var(--radius-full) !important;
+    gap: 3px !important;
+  }
+
+  .header-logout-text {
+    display: none;
+  }
+}
+
 /* ==========================================================================
    BOTTOM NAVIGATION (MOBILE)
    ========================================================================== */
@@ -998,7 +1069,53 @@ button {
   z-index: 1;
   box-shadow: 0 20px 60px rgba(1, 96, 109, 0.14), 0 4px 16px rgba(0, 0, 0, 0.04) !important;
   border: 1px solid rgba(1, 96, 109, 0.12);
-  padding: 26px 30px;
+  padding: 22px 26px;
+}
+
+/* Barra Superior del Onboarding Modal (sin solapamientos en móvil) */
+.onboarding-modal-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.btn-onboarding-admin {
+  background: var(--petrol-soft);
+  border: 1px solid var(--turquoise-light);
+  color: var(--petrol);
+  border-radius: var(--radius-full);
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: var(--transition-fast);
+}
+
+.btn-onboarding-admin:hover {
+  background: var(--turquoise-soft);
+}
+
+.btn-onboarding-close {
+  background: transparent;
+  border: none;
+  color: var(--gray-400);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: var(--transition-fast);
+}
+
+.btn-onboarding-close:hover {
+  color: var(--gray-700);
+  background: var(--gray-100);
 }
 
 .modal-card {
@@ -1112,6 +1229,179 @@ button {
 @keyframes slideInUp {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
+}
+
+/* ==========================================================================
+   PORTAL ADMIN HEADER (RESPONSIVE)
+   ========================================================================== */
+.admin-portal-header {
+  background: var(--white);
+  border-bottom: 1px solid var(--gray-200);
+  padding: 14px 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow-xs);
+}
+
+.admin-portal-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.admin-header-logo {
+  height: 36px;
+  width: auto;
+}
+
+.admin-portal-header-titles {
+  border-left: 1.5px solid var(--gray-200);
+  padding-left: 14px;
+}
+
+.admin-portal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-portal-title {
+  font-weight: 800;
+  color: var(--petrol);
+  font-size: 1.05rem;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+
+.admin-portal-badge {
+  background: var(--petrol-soft);
+  color: var(--petrol);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-portal-subtitle {
+  font-size: 0.78rem;
+  color: var(--gray-500);
+  display: block;
+}
+
+.admin-portal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-logout-btn {
+  gap: 6px;
+  color: var(--gray-700);
+  border-color: var(--gray-300);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .admin-portal-header {
+    padding: 10px 14px;
+  }
+
+  .admin-portal-header-brand {
+    gap: 10px;
+  }
+
+  .admin-header-logo {
+    height: 28px;
+  }
+
+  .admin-portal-header-titles {
+    border-left: 1px solid var(--gray-200);
+    padding-left: 8px;
+  }
+
+  .admin-portal-title {
+    font-size: 0.85rem;
+  }
+
+  /* Ocultar elementos secundarios en móvil para que el header quede limpio y no se distorsione */
+  .admin-portal-badge {
+    display: none;
+  }
+
+  .admin-portal-subtitle {
+    display: none;
+  }
+
+  .admin-logout-btn {
+    padding: 5px 10px;
+    font-size: 0.76rem;
+    gap: 4px;
+  }
+}
+
+/* ==========================================================================
+   BARRA DE NAVEGACIÓN DE BLOQUES (MI RETO)
+   ========================================================================== */
+.reto-nav-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  position: sticky;
+  bottom: calc(var(--bottom-nav-height) + 8px);
+  z-index: 80;
+  box-shadow: 0 8px 30px rgba(1, 96, 109, 0.15);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.reto-btn-complete {
+  min-width: 190px;
+}
+
+@media (max-width: 768px) {
+  .reto-nav-card {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 10px 12px;
+    bottom: calc(var(--bottom-nav-height) + 4px);
+  }
+
+  .reto-btn-complete {
+    grid-column: span 2;
+    order: 1;
+    width: 100%;
+    min-width: unset !important;
+    justify-content: center;
+    padding: 11px 14px;
+    font-size: 0.88rem;
+  }
+
+  .reto-btn-prev {
+    grid-column: 1;
+    order: 2;
+    width: 100%;
+    justify-content: center;
+    padding: 10px 8px;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
+
+  .reto-btn-next {
+    grid-column: 2;
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    padding: 10px 8px;
+    font-size: 0.82rem;
+    white-space: nowrap;
+  }
 }
 
 /* ==========================================================================

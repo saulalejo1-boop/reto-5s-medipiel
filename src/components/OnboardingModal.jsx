@@ -119,47 +119,34 @@ export function OnboardingModal() {
       </div>
 
       <div className="modal-card">
-        {/* Botón rápido Acceso Admin en la esquina superior izquierda */}
-        <button
-          type="button"
-          onClick={() => {
-            setIsOnboardingOpen(false);
-            setActiveTab('admin');
-          }}
-          style={{
-            position: 'absolute',
-            top: '18px',
-            left: '20px',
-            background: 'var(--petrol-soft)',
-            border: '1px solid var(--turquoise-light)',
-            color: 'var(--petrol)',
-            borderRadius: 'var(--radius-full)',
-            padding: '5px 12px',
-            fontSize: '0.78rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            transition: 'var(--transition-fast)'
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--turquoise-soft)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'var(--petrol-soft)'}
-          title="Acceso directo al Portal de Administrador"
-        >
-          <ShieldCheck size={14} color="var(--petrol)" />
-          <span>Acceso Admin</span>
-        </button>
-
-        {isExistingUser && (
+        {/* Barra superior del modal: Acceso Admin y botón Cerrar (evita solaparse con el logo en móvil) */}
+        <div className="onboarding-modal-top-bar">
           <button
-            onClick={() => setIsOnboardingOpen(false)}
-            style={{ position: 'absolute', top: '20px', right: '20px', color: 'var(--gray-400)' }}
-            aria-label="Cerrar"
+            type="button"
+            className="btn-onboarding-admin"
+            onClick={() => {
+              setIsOnboardingOpen(false);
+              setActiveTab('admin');
+            }}
+            title="Acceso directo al Portal de Administrador"
           >
-            <X size={22} />
+            <ShieldCheck size={14} />
+            <span>Acceso Admin</span>
           </button>
-        )}
+
+          {isExistingUser ? (
+            <button
+              type="button"
+              onClick={() => setIsOnboardingOpen(false)}
+              className="btn-onboarding-close"
+              aria-label="Cerrar modal"
+            >
+              <X size={20} />
+            </button>
+          ) : (
+            <span style={{ width: '28px' }}></span>
+          )}
+        </div>
 
         {/* Modal Header */}
         <div style={{ textAlign: 'center', marginBottom: '18px' }}>

@@ -321,45 +321,33 @@ export function AdminPortalView() {
   return (
     <div className="admin-portal-root" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-app)' }}>
       {/* Barra Superior de Navegación Exclusiva del Administrador */}
-      <header className="no-print" style={{
-        background: 'var(--white)',
-        borderBottom: '1px solid var(--gray-200)',
-        padding: '14px 28px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        boxShadow: 'var(--shadow-xs)'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <img src="/medipiel-logo.png" alt="Medipiel" style={{ height: '36px', width: 'auto' }} />
-          <div style={{ borderLeft: '1.5px solid var(--gray-200)', paddingLeft: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontWeight: 800, color: 'var(--petrol)', fontSize: '1.05rem', letterSpacing: '-0.3px' }}>
+      <header className="no-print admin-portal-header">
+        <div className="admin-portal-header-brand">
+          <img src="/medipiel-logo.png" alt="Medipiel" className="admin-header-logo" />
+          <div className="admin-portal-header-titles">
+            <div className="admin-portal-title-row">
+              <span className="admin-portal-title">
                 PORTAL ADMIN RETO 5S
               </span>
-              <span style={{ background: 'var(--petrol-soft)', color: 'var(--petrol)', padding: '2px 8px', borderRadius: 'var(--radius-full)', fontSize: '0.72rem', fontWeight: 700 }}>
+              <span className="admin-portal-badge">
                 Control y Reportes
               </span>
             </div>
-            <span style={{ fontSize: '0.78rem', color: 'var(--gray-500)' }}>
+            <span className="admin-portal-subtitle">
               Supervisión y Analítica Corporativa
             </span>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div className="admin-portal-header-actions">
           <button
             type="button"
-            className="btn btn-outline btn-sm"
+            className="btn btn-outline btn-sm admin-logout-btn"
             onClick={handleAdminLogout}
-            style={{ gap: '6px', color: 'var(--gray-700)', borderColor: 'var(--gray-300)' }}
             title="Cerrar sesión de administrador"
           >
             <LogOut size={14} />
-            <span>Cerrar Sesión Admin</span>
+            <span className="admin-logout-text">Cerrar Sesión</span>
           </button>
         </div>
       </header>

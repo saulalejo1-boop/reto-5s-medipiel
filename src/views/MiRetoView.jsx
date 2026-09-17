@@ -291,21 +291,10 @@ export function MiRetoView() {
       )}
 
       {/* Barra de Navegación de Bloques */}
-      <div className="card" style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '16px 24px',
-        position: 'sticky',
-        bottom: 'calc(var(--bottom-nav-height) + 8px)',
-        zIndex: 80,
-        boxShadow: '0 8px 30px rgba(1, 96, 109, 0.15)',
-        background: 'rgba(255, 255, 255, 0.96)',
-        backdropFilter: 'blur(10px)'
-      }}>
+      <div className="card reto-nav-card">
         <button
           type="button"
-          className="btn btn-outline"
+          className="btn btn-outline reto-btn-prev"
           onClick={handlePrevBlock}
           disabled={currentBlockId <= 1}
           style={{ opacity: currentBlockId <= 1 ? 0.4 : 1 }}
@@ -316,9 +305,8 @@ export function MiRetoView() {
 
         <button
           type="button"
-          className={`btn ${isBlockFullyCompleted ? 'btn-success' : 'btn-secondary'}`}
+          className={`btn reto-btn-complete ${isBlockFullyCompleted ? 'btn-success' : 'btn-secondary'}`}
           onClick={() => isUserLoggedIn ? toggleBlockCompletion(activeBlock.id) : setIsOnboardingOpen(true)}
-          style={{ minWidth: '190px' }}
         >
           <Check size={16} />
           <span>{isBlockFullyCompleted ? 'Bloque Listo ✓' : 'Marcar Bloque Listo'}</span>
@@ -326,7 +314,7 @@ export function MiRetoView() {
 
         <button
           type="button"
-          className="btn btn-primary"
+          className="btn btn-primary reto-btn-next"
           onClick={handleNextBlock}
           disabled={currentBlockId >= BLOQUES_DATA.length}
           style={{ opacity: currentBlockId >= BLOQUES_DATA.length ? 0.4 : 1 }}
