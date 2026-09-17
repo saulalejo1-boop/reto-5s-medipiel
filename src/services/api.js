@@ -9,7 +9,7 @@ const STORAGE_KEY_URL = "medipiel_reto5s_script_url";
 const STORAGE_KEY_OFFLINE_QUEUE = "medipiel_reto5s_offline_queue";
 
 // URL predeterminada de Google Apps Script (puede actualizarse desde la UI de ajustes)
-const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzQEYmmHsDzmtHE2eGQ97L2s2qymV2puhtGVAULVwFDlwzwX1wJmmFjuApgXmxEhqM/exec";
+const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjG846ZHMSSyIbZ7cPfToyal89sZ4bpar-WfZm-EoypEkZ8_2BAyYD5wr8FVOYekYsvA/exec";
 
 /**
  * Normaliza cadenas de texto para comparaciones sin distinción de mayúsculas o tildes
