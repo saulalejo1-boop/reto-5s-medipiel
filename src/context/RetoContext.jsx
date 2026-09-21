@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { api, createEmptyParticipant, normalizeText } from '../services/api';
 import { BLOQUES_DATA, getBlockForDay } from '../data/cartillaContent';
+import { validateBlockRequirements, isBlockUnlocked, getFirstIncompleteBlock } from '../utils/blockValidation';
 
 const RetoContext = createContext(null);
 
@@ -363,10 +364,7 @@ export function RetoProvider({ children }) {
         // Completar todos los días del bloque
         const set = new Set([...currentList, ...block.dias]);
         updatedList = Array.from(set).sort((a, b) => a - b);
-        showToast(`¡Bloque ${block.sName} (${block.diasRango}) completado!`, 'success');
-        if (block.id === 8 || updatedList.length === 30) {
-          setIsCelebrationOpen(true);
-        }
+        showToast(`¡Días del bloque ${block.sName} (${block.diasRango}) marcados!`, 'success');
       }
 
       const totalDias = 30;
@@ -384,16 +382,31 @@ export function RetoProvider({ children }) {
   }, [persistChanges, showToast]);
 
   /**
-   * Navegar a un bloque específico
+   * Navegar a un bloque específico (validando si está desbloqueado)
    */
   const goToBlock = useCallback((blockId) => {
-    setCurrentBlockId(blockId);
-    const block = BLOQUES_DATA.find(b => b.id === blockId);
-    if (block && block.dias.length > 0) {
-      setCurrentDay(block.dias[0]);
+    const targetId = Number(blockId);
+    if (!isBlockUnlocked(targetId, participant)) {
+      const firstIncomplete = getFirstIncompleteBlock(participant);
+      const incBlock = BLOQUES_DATA.find(b => b.id === firstIncomplete);
+      showToast(
+        `Debes completar primero el bloque ${incBlock?.sName || firstIncomplete} para poder avanzar.`,
+        'warning'
+      );
+      setCurrentBlockId(firstIncomplete);
+      const block = BLOQUES_DATA.find(b => b.id === firstIncomplete);
+      if (block && block.dias.length > 0) {
+        setCurrentDay(block.dias[0]);
+      }
+    } else {
+      setCurrentBlockId(targetId);
+      const block = BLOQUES_DATA.find(b => b.id === targetId);
+      if (block && block.dias.length > 0) {
+        setCurrentDay(block.dias[0]);
+      }
     }
     setActiveTab('reto');
-  }, []);
+  }, [participant, showToast]);
 
   const isUserLoggedIn = Boolean(participant && participant.nombre && participant.nombre.trim().length > 0);
 

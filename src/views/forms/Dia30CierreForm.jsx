@@ -1,10 +1,11 @@
 import React from 'react';
 import { useReto } from '../../context/RetoContext';
 import { MisionesTable } from '../../components/MisionesTable';
-import { Award, Heart, Sparkles, Check, BookmarkCheck } from 'lucide-react';
+import { Award, Heart, Sparkles, Check, BookmarkCheck, AlertCircle } from 'lucide-react';
+import { validateBlockRequirements } from '../../utils/blockValidation';
 
 export function Dia30CierreForm({ block }) {
-  const { participant, updateField, setIsCelebrationOpen } = useReto();
+  const { participant, updateField, setIsCelebrationOpen, showToast } = useReto();
 
   const cincoSList = [
     { id: 'SER', label: 'SER', color: '#01606D' },
@@ -294,7 +295,20 @@ export function Dia30CierreForm({ block }) {
         <button
           type="button"
           className="btn btn-primary btn-lg"
-          onClick={() => setIsCelebrationOpen(true)}
+          onClick={() => {
+            const val = validateBlockRequirements(8, participant);
+            if (!val.isComplete) {
+              const count = val.missingFields.length + val.missingDays.length;
+              showToast(`Tienes ${count} requisito(s) pendiente(s) en el Día 30 para culminar el reto.`, 'warning');
+              alert(
+                `Para culminar y celebrar el Reto 5S, debes completar:\n\n` +
+                (val.missingDays.length > 0 ? `• Marcar el Día 30 en la tabla de misión\n` : '') +
+                val.missingFields.map(f => `• ${f}`).join('\n')
+              );
+              return;
+            }
+            setIsCelebrationOpen(true);
+          }}
           style={{
             background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
             boxShadow: '0 8px 24px rgba(16, 185, 129, 0.35)',

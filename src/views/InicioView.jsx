@@ -1,6 +1,7 @@
 import React from 'react';
 import { useReto } from '../context/RetoContext';
-import { CINCO_S, DIAS_DATA, RETO_INFO, getBlockForDay } from '../data/cartillaContent';
+import { CINCO_S, DIAS_DATA, RETO_INFO, BLOQUES_DATA, getBlockForDay } from '../data/cartillaContent';
+import { getFirstIncompleteBlock } from '../utils/blockValidation';
 import {
   Sparkles,
   ArrowRight,
@@ -19,8 +20,9 @@ import {
 export function InicioView() {
   const { participant, isUserLoggedIn, setActiveTab, goToBlock, setIsOnboardingOpen } = useReto();
 
-  const currentDayNum = participant.dia_actual || 1;
-  const currentBlock = getBlockForDay(currentDayNum);
+  const activeIncompleteBlockId = getFirstIncompleteBlock(participant);
+  const currentBlock = BLOQUES_DATA.find(b => b.id === activeIncompleteBlockId) || BLOQUES_DATA[0];
+  const currentDayNum = currentBlock.dias[0] || participant.dia_actual || 1;
   const todayData = DIAS_DATA.find(d => d.dia === currentDayNum) || DIAS_DATA[0];
   const completados = participant.dias_completados || [];
   const isTodayCompleted = completados.includes(currentDayNum);

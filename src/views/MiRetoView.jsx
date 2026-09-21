@@ -1,6 +1,7 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { useReto } from '../context/RetoContext';
 import { BLOQUES_DATA, ETAPAS } from '../data/cartillaContent';
+import { validateBlockRequirements, isBlockUnlocked } from '../utils/blockValidation';
 import { SerForm } from './forms/SerForm';
 import { ServirForm } from './forms/ServirForm';
 import { SaberForm } from './forms/SaberForm';
@@ -16,34 +17,44 @@ import {
   Check,
   Layers,
   Sparkles,
-  UserCheck
+  UserCheck,
+  Lock,
+  AlertCircle,
+  X
 } from 'lucide-react';
 
 export function MiRetoView() {
   const {
     currentBlockId,
     setCurrentBlockId,
+    setCurrentDay,
     participant,
     isUserLoggedIn,
     setIsOnboardingOpen,
-    toggleBlockCompletion
+    toggleBlockCompletion,
+    showToast
   } = useReto();
 
   const blockPillsRef = useRef(null);
+  const [validationAlert, setValidationAlert] = useState(null);
 
   const activeBlock = BLOQUES_DATA.find(b => b.id === currentBlockId) || BLOQUES_DATA[0];
   const completados = participant.dias_completados || [];
 
+  // Validación estricta del bloque activo (preguntas y días marcados)
+  const activeValidation = validateBlockRequirements(activeBlock.id, participant);
+  const isBlockFullyCompleted = activeValidation.isComplete;
+
   // Días completados en este bloque
   const diasEnBloque = activeBlock.dias || [];
   const diasCompletadosEnBloque = diasEnBloque.filter(d => completados.includes(d));
-  const isBlockFullyCompleted = diasEnBloque.length > 0 && diasEnBloque.every(d => completados.includes(d));
   const blockPercent = Math.round((diasCompletadosEnBloque.length / diasEnBloque.length) * 100);
 
   const etapaActual = activeBlock.etapa === 1 ? ETAPAS[0] : ETAPAS[1];
 
-  // Auto-scroll del carrusel de bloques
+  // Auto-scroll del carrusel de bloques y limpiar alertas al cambiar de bloque
   useEffect(() => {
+    setValidationAlert(null);
     if (blockPillsRef.current) {
       const activeBtn = blockPillsRef.current.querySelector('.block-pill.active');
       if (activeBtn) {
@@ -54,14 +65,88 @@ export function MiRetoView() {
 
   const handlePrevBlock = () => {
     if (currentBlockId > 1) {
+      setValidationAlert(null);
       setCurrentBlockId(currentBlockId - 1);
+      const prevBlock = BLOQUES_DATA.find(b => b.id === currentBlockId - 1);
+      if (prevBlock && prevBlock.dias.length > 0) {
+        setCurrentDay(prevBlock.dias[0]);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
   const handleNextBlock = () => {
-    if (currentBlockId < BLOQUES_DATA.length) {
-      setCurrentBlockId(currentBlockId + 1);
+    // Validar rigurosamente que el bloque actual esté 100% respondido y marcado
+    const validation = validateBlockRequirements(currentBlockId, participant);
+    if (!validation.isComplete) {
+      setValidationAlert({
+        blockId: currentBlockId,
+        blockName: activeBlock.sName,
+        missingDays: validation.missingDays,
+        missingFields: validation.missingFields
+      });
+      showToast(
+        `Para avanzar al siguiente bloque, debes completar todas las respuestas y marcar los días del bloque ${activeBlock.sName}.`,
+        'warning'
+      );
+      setTimeout(() => {
+        const el = document.getElementById('block-validation-alert');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+      return;
     }
+
+    setValidationAlert(null);
+    if (currentBlockId < BLOQUES_DATA.length) {
+      const nextId = currentBlockId + 1;
+      setCurrentBlockId(nextId);
+      const nextBlock = BLOQUES_DATA.find(b => b.id === nextId);
+      if (nextBlock && nextBlock.dias.length > 0) {
+        setCurrentDay(nextBlock.dias[0]);
+      }
+      showToast(`¡Excelente! Avanzaste al bloque ${nextBlock?.sName || nextId}.`, 'success');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleSelectBlock = (targetId) => {
+    // Permitir navegar a bloques previos o al actual
+    if (targetId <= currentBlockId) {
+      setValidationAlert(null);
+      setCurrentBlockId(targetId);
+      const b = BLOQUES_DATA.find(item => item.id === targetId);
+      if (b && b.dias.length > 0) setCurrentDay(b.dias[0]);
+      return;
+    }
+
+    // Si intenta saltar a un bloque posterior, verificar que todos los bloques anteriores estén completos
+    for (let i = 1; i < targetId; i++) {
+      const v = validateBlockRequirements(i, participant);
+      if (!v.isComplete) {
+        const blocked = BLOQUES_DATA.find(item => item.id === i);
+        setValidationAlert({
+          blockId: i,
+          blockName: blocked?.sName,
+          missingDays: v.missingDays,
+          missingFields: v.missingFields
+        });
+        showToast(
+          `Bloque bloqueado. Debes completar primero el bloque ${blocked?.sName || i} para continuar.`,
+          'warning'
+        );
+        setCurrentBlockId(i);
+        setTimeout(() => {
+          const el = document.getElementById('block-validation-alert');
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 100);
+        return;
+      }
+    }
+
+    setValidationAlert(null);
+    setCurrentBlockId(targetId);
+    const b = BLOQUES_DATA.find(item => item.id === targetId);
+    if (b && b.dias.length > 0) setCurrentDay(b.dias[0]);
   };
 
   const renderActiveBlockForm = () => {
@@ -134,33 +219,39 @@ export function MiRetoView() {
           }}
         >
           {BLOQUES_DATA.map(b => {
-            const isDone = b.dias.every(d => completados.includes(d));
+            const bValidation = validateBlockRequirements(b.id, participant);
+            const isDone = bValidation.isComplete;
             const isActive = b.id === currentBlockId;
             const completedCount = b.dias.filter(d => completados.includes(d)).length;
+            const isUnlocked = isBlockUnlocked(b.id, participant) || b.id <= currentBlockId;
 
             return (
               <button
                 key={b.id}
                 type="button"
                 className={`block-pill ${isActive ? 'active' : ''}`}
-                onClick={() => setCurrentBlockId(b.id)}
+                onClick={() => handleSelectBlock(b.id)}
+                title={!isUnlocked ? `Bloque bloqueado. Completa los bloques anteriores para desbloquearlo.` : `Ir a ${b.sName}`}
                 style={{
                   flexShrink: 0,
                   minWidth: '130px',
                   padding: '10px 14px',
                   borderRadius: 'var(--radius-md)',
-                  border: isActive ? `2.5px solid ${b.color}` : '1.5px solid var(--gray-200)',
+                  border: isActive ? `2.5px solid ${b.color}` : isUnlocked ? '1.5px solid var(--gray-200)' : '1.5px dashed var(--gray-300)',
                   background: isActive
                     ? 'linear-gradient(135deg, var(--petrol) 0%, var(--petrol-light) 100%)'
                     : isDone
                     ? 'var(--turquoise-soft)'
-                    : 'var(--white)',
-                  color: isActive ? 'var(--white)' : isDone ? 'var(--petrol)' : 'var(--gray-700)',
+                    : isUnlocked
+                    ? 'var(--white)'
+                    : 'var(--gray-50)',
+                  color: isActive ? 'var(--white)' : isDone ? 'var(--petrol)' : isUnlocked ? 'var(--gray-700)' : 'var(--gray-400)',
+                  opacity: !isUnlocked ? 0.75 : 1,
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'flex-start',
                   gap: '4px',
-                  cursor: 'pointer',
+                  cursor: isUnlocked ? 'pointer' : 'not-allowed',
                   transition: 'var(--transition-fast)',
                   boxShadow: isActive ? '0 4px 14px rgba(1, 96, 109, 0.25)' : 'none',
                   textAlign: 'left'
@@ -171,11 +262,22 @@ export function MiRetoView() {
                     fontSize: '0.7rem',
                     fontWeight: 800,
                     textTransform: 'uppercase',
-                    color: isActive ? 'var(--turquoise-light)' : b.color
+                    color: isActive ? 'var(--turquoise-light)' : isUnlocked ? b.color : 'var(--gray-400)'
                   }}>
                     {b.diasRango}
                   </span>
-                  {isDone ? (
+                  {!isUnlocked ? (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '2px',
+                      color: 'var(--gray-400)',
+                      fontSize: '0.65rem',
+                      fontWeight: 700
+                    }}>
+                      <Lock size={12} />
+                    </div>
+                  ) : isDone ? (
                     <div style={{
                       width: '16px',
                       height: '16px',
@@ -215,11 +317,11 @@ export function MiRetoView() {
               </span>
               {isBlockFullyCompleted ? (
                 <span className="badge badge-green">
-                  <CheckCircle2 size={13} /> Bloque Completado
+                  <CheckCircle2 size={13} /> Bloque Completado al 100%
                 </span>
               ) : (
                 <span className="badge badge-gold">
-                  {diasCompletadosEnBloque.length} de {diasEnBloque.length} días completados ({blockPercent}%)
+                  {diasCompletadosEnBloque.length} de {diasEnBloque.length} días marcados ({blockPercent}%)
                 </span>
               )}
             </div>
@@ -228,15 +330,17 @@ export function MiRetoView() {
             </h2>
           </div>
 
-          {/* Botón para marcar todo el bloque */}
+          {/* Botón para marcar los días del bloque */}
           <button
             type="button"
-            className={`btn ${isBlockFullyCompleted ? 'btn-success' : 'btn-primary'}`}
+            className={`btn ${diasCompletadosEnBloque.length === diasEnBloque.length ? 'btn-success' : 'btn-primary'}`}
             onClick={() => isUserLoggedIn ? toggleBlockCompletion(activeBlock.id) : setIsOnboardingOpen(true)}
             style={{ gap: '8px' }}
           >
             <CheckCircle2 size={18} />
-            <span>{isBlockFullyCompleted ? '✓ Bloque Completado' : 'Marcar bloque como completado'}</span>
+            <span>
+              {diasCompletadosEnBloque.length === diasEnBloque.length ? '✓ Días del bloque marcados' : 'Marcar días como completados'}
+            </span>
           </button>
         </div>
 
@@ -290,6 +394,76 @@ export function MiRetoView() {
         renderActiveBlockForm()
       )}
 
+      {/* Alerta Destacada de Requisitos Faltantes */}
+      {validationAlert && (
+        <div
+          id="block-validation-alert"
+          className="card"
+          style={{
+            background: '#FEF2F2',
+            border: '2px solid #EF4444',
+            borderRadius: 'var(--radius-lg)',
+            padding: '20px 24px',
+            boxShadow: '0 8px 24px rgba(239, 68, 68, 0.15)'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px' }}>
+              <div style={{
+                width: '38px',
+                height: '38px',
+                borderRadius: '50%',
+                background: '#DC2626',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <AlertCircle size={22} />
+              </div>
+              <div>
+                <h4 style={{ fontSize: '1.1rem', color: '#991B1B', margin: '0 0 6px 0', fontWeight: 800 }}>
+                  Requisitos pendientes para avanzar desde el bloque {validationAlert.blockName}
+                </h4>
+                <p style={{ fontSize: '0.9rem', color: '#7F1D1D', margin: '0 0 12px 0', lineHeight: 1.45 }}>
+                  Para continuar al siguiente bloque, debes completar todas las respuestas y marcar los días requeridos en este bloque:
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.86rem' }}>
+                  {validationAlert.missingDays && validationAlert.missingDays.length > 0 && (
+                    <div style={{ background: '#FFFFFF', padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid #FCA5A5', color: '#991B1B' }}>
+                      <strong>📅 Días pendientes por marcar en la tabla:</strong>{' '}
+                      {validationAlert.missingDays.map(d => `Día ${d}`).join(', ')}
+                    </div>
+                  )}
+
+                  {validationAlert.missingFields && validationAlert.missingFields.length > 0 && (
+                    <div style={{ background: '#FFFFFF', padding: '10px 14px', borderRadius: 'var(--radius-sm)', border: '1px solid #FCA5A5', color: '#991B1B' }}>
+                      <strong>✍️ Preguntas o reflexiones pendientes por responder:</strong>
+                      <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                        {validationAlert.missingFields.map((field, idx) => (
+                          <li key={idx} style={{ marginBottom: '3px' }}>{field}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setValidationAlert(null)}
+              style={{ background: 'transparent', border: 'none', color: '#991B1B', cursor: 'pointer', padding: '4px' }}
+              title="Cerrar advertencia"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Barra de Navegación de Bloques */}
       <div className="card reto-nav-card">
         <button
@@ -309,7 +483,7 @@ export function MiRetoView() {
           onClick={() => isUserLoggedIn ? toggleBlockCompletion(activeBlock.id) : setIsOnboardingOpen(true)}
         >
           <Check size={16} />
-          <span>{isBlockFullyCompleted ? 'Bloque Listo ✓' : 'Marcar Bloque Listo'}</span>
+          <span>{isBlockFullyCompleted ? 'Bloque 100% Listo ✓' : 'Marcar Días del Bloque'}</span>
         </button>
 
         <button
@@ -317,12 +491,16 @@ export function MiRetoView() {
           className="btn btn-primary reto-btn-next"
           onClick={handleNextBlock}
           disabled={currentBlockId >= BLOQUES_DATA.length}
-          style={{ opacity: currentBlockId >= BLOQUES_DATA.length ? 0.4 : 1 }}
+          style={{
+            opacity: currentBlockId >= BLOQUES_DATA.length ? 0.4 : 1,
+            cursor: currentBlockId >= BLOQUES_DATA.length ? 'default' : 'pointer'
+          }}
         >
-          <span>Siguiente bloque</span>
+          <span>{currentBlockId >= BLOQUES_DATA.length ? 'Último Bloque (Día 30)' : 'Siguiente bloque'}</span>
           <ChevronRight size={18} />
         </button>
       </div>
+
     </div>
   );
 }
