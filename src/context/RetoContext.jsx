@@ -268,6 +268,23 @@ export function RetoProvider({ children }) {
   }, []);
 
   /**
+   * Descarga todos los perfiles de colaboradores desde Google Sheets y actualiza el directorio local
+   */
+  const syncRemoteProfiles = useCallback(async () => {
+    try {
+      const res = await api.fetchParticipantsFromGoogleSheets();
+      if (res && res.success && Array.isArray(res.participants)) {
+        setSavedProfiles(api.getSavedProfiles());
+        return res;
+      }
+      return res || { success: false };
+    } catch (e) {
+      console.warn("syncRemoteProfiles falló:", e);
+      return { success: false, error: e.message };
+    }
+  }, []);
+
+  /**
    * Cierra la sesión activa con guardado previo y abre el modal de ingreso
    */
   const logout = useCallback(() => {
@@ -409,6 +426,7 @@ export function RetoProvider({ children }) {
         deleteProfile,
         savedProfiles,
         refreshProfiles,
+        syncRemoteProfiles,
         startParticipant,
         forceSync,
         resetParticipant

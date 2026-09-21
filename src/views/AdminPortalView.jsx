@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useReto } from '../context/RetoContext';
 import { api } from '../services/api';
 import { exportParticipantsToCsv } from '../utils/exportCsv';
@@ -36,6 +36,7 @@ export function AdminPortalView() {
     isUserLoggedIn,
     savedProfiles = [],
     refreshProfiles,
+    syncRemoteProfiles,
     setActiveTab,
     setIsOnboardingOpen,
     showToast
@@ -69,22 +70,86 @@ export function AdminPortalView() {
   const [connectionStatus, setConnectionStatus] = useState(null); // null | 'success' | 'error'
   const [isSyncingAll, setIsSyncingAll] = useState(false);
 
-  // Lista unificada de participantes
-  // Si la sesión actual tiene datos pero aún no está en savedProfiles, la incluimos
-  const allParticipants = useMemo(() => {
-    let list = Array.isArray(savedProfiles) ? [...savedProfiles] : [];
-    if (participant && participant.nombre && participant.nombre.trim().length > 0) {
-      const exists = list.some(p => p.participant_id === participant.participant_id);
-      if (!exists) {
-        list.unshift(participant);
-      } else {
-        // Asegurar que tenga la versión más actualizada
-        const idx = list.findIndex(p => p.participant_id === participant.participant_id);
-        if (idx >= 0) list[idx] = participant;
+  // Estados de sincronización en tiempo real con Google Sheets (para ver respuestas de celulares)
+  const [cloudParticipants, setCloudParticipants] = useState([]);
+  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
+  const [lastCloudSync, setLastCloudSync] = useState(null);
+
+  /**
+   * Consulta a Google Sheets y trae en vivo todas las respuestas enviadas desde celulares y otros equipos
+   */
+  const fetchRemoteData = useCallback(async (showNotification = false) => {
+    setIsLoadingCloud(true);
+    try {
+      const res = await api.fetchParticipantsFromGoogleSheets();
+      if (res && res.success && Array.isArray(res.participants)) {
+        setCloudParticipants(res.participants);
+        setLastCloudSync(new Date());
+        if (refreshProfiles) refreshProfiles();
+        if (showNotification) {
+          showToast(`¡Sincronizado! Se cargaron ${res.participants.length} colaboradores desde Google Sheets.`, 'success');
+        }
+      } else if (showNotification) {
+        showToast(res?.error || 'No se pudieron descargar los datos remotos de Google Sheets.', 'warning');
       }
+    } catch (err) {
+      if (showNotification) {
+        showToast('Error al conectar con Google Sheets.', 'warning');
+      }
+    } finally {
+      setIsLoadingCloud(false);
     }
-    return list;
-  }, [savedProfiles, participant]);
+  }, [refreshProfiles, showToast]);
+
+  // Carga automática de Google Sheets al entrar autenticado al portal
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchRemoteData(false);
+    }
+  }, [isAuthenticated, fetchRemoteData]);
+
+  // Lista unificada de participantes (combina LocalStorage con los datos de Google Sheets)
+  const allParticipants = useMemo(() => {
+    const map = new Map();
+
+    // 1. Agregar perfiles guardados localmente
+    if (Array.isArray(savedProfiles)) {
+      savedProfiles.forEach(p => {
+        if (p && (p.participant_id || p.nombre)) {
+          const key = (p.nombre || '').toLowerCase().trim();
+          if (key) map.set(key, p);
+        }
+      });
+    }
+
+    // 2. Agregar sesión local activa si tiene nombre
+    if (participant && participant.nombre && participant.nombre.trim().length > 0) {
+      const key = participant.nombre.toLowerCase().trim();
+      map.set(key, participant);
+    }
+
+    // 3. Agregar o actualizar con los datos descargados en vivo desde Google Sheets (celulares y otras sedes)
+    if (Array.isArray(cloudParticipants)) {
+      cloudParticipants.forEach(cp => {
+        if (cp && cp.nombre && cp.nombre.trim().length > 0) {
+          const key = cp.nombre.toLowerCase().trim();
+          const existing = map.get(key);
+          if (!existing) {
+            map.set(key, cp);
+          } else {
+            // Comparar fechas o porcentaje para conservar la versión con mayor progreso
+            const tCloud = cp.fecha_ultima_actualizacion ? new Date(cp.fecha_ultima_actualizacion).getTime() : 0;
+            const tLocal = existing.fecha_ultima_actualizacion ? new Date(existing.fecha_ultima_actualizacion).getTime() : 0;
+            if (tCloud >= tLocal || (cp.porcentaje_avance || 0) >= (existing.porcentaje_avance || 0)) {
+              map.set(key, { ...existing, ...cp });
+            }
+          }
+        }
+      });
+    }
+
+    return Array.from(map.values());
+  }, [savedProfiles, participant, cloudParticipants]);
 
   // Manejo de autenticación
   const handleLogin = (e) => {
@@ -342,6 +407,18 @@ export function AdminPortalView() {
         <div className="admin-portal-header-actions">
           <button
             type="button"
+            className="btn btn-outline btn-sm admin-refresh-btn"
+            onClick={() => fetchRemoteData(true)}
+            disabled={isLoadingCloud}
+            title="Sincronizar respuestas desde Google Sheets"
+            style={{ gap: '6px' }}
+          >
+            <RefreshCw size={14} className={isLoadingCloud ? 'spin' : ''} />
+            <span className="admin-refresh-text">{isLoadingCloud ? 'Cargando...' : 'Sincronizar'}</span>
+          </button>
+
+          <button
+            type="button"
             className="btn btn-outline btn-sm admin-logout-btn"
             onClick={handleAdminLogout}
             title="Cerrar sesión de administrador"
@@ -381,25 +458,54 @@ export function AdminPortalView() {
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleExportCsv}
-              style={{
-                background: 'var(--turquoise)',
-                color: 'var(--petrol)',
-                fontWeight: 800,
-                gap: '8px',
-                padding: '10px 20px',
-                borderRadius: 'var(--radius-full)',
-                boxShadow: '0 4px 14px rgba(45, 204, 211, 0.25)'
-              }}
-              title="Descargar informe completo en Excel (.CSV)"
-            >
-              <Download size={16} />
-              <span>Descargar Informe Excel (.CSV)</span>
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => fetchRemoteData(true)}
+                disabled={isLoadingCloud}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(255, 255, 255, 0.35)',
+                  fontWeight: 700,
+                  gap: '8px',
+                  padding: '10px 18px',
+                  borderRadius: 'var(--radius-full)',
+                  cursor: isLoadingCloud ? 'wait' : 'pointer'
+                }}
+                title="Traer respuestas más recientes desde Google Sheets (celulares y equipos)"
+              >
+                <RefreshCw size={16} className={isLoadingCloud ? 'spin' : ''} />
+                <span>{isLoadingCloud ? 'Consultando Google Sheets...' : 'Actualizar Respuestas en Vivo'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleExportCsv}
+                style={{
+                  background: 'var(--turquoise)',
+                  color: 'var(--petrol)',
+                  fontWeight: 800,
+                  gap: '8px',
+                  padding: '10px 20px',
+                  borderRadius: 'var(--radius-full)',
+                  boxShadow: '0 4px 14px rgba(45, 204, 211, 0.25)'
+                }}
+                title="Descargar informe completo en Excel (.CSV)"
+              >
+                <Download size={16} />
+                <span>Descargar Informe Excel (.CSV)</span>
+              </button>
+            </div>
+
+            {lastCloudSync && (
+              <span style={{ fontSize: '0.78rem', color: 'rgba(255, 255, 255, 0.82)', fontWeight: 500 }}>
+                Última sincronización con Google Sheets: {lastCloudSync.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} ({cloudParticipants.length} colaboradores en nube)
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -607,6 +713,52 @@ export function AdminPortalView() {
       {/* ============================================================= */}
       {adminTab === 'participantes' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Barra Informativa de Sincronización en Vivo */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'var(--petrol-soft)',
+            border: '1px solid var(--turquoise-light)',
+            borderRadius: 'var(--radius-md)',
+            padding: '12px 18px',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '10px',
+                height: '10px',
+                borderRadius: '50%',
+                background: isLoadingCloud ? 'var(--warning)' : 'var(--success)',
+                boxShadow: isLoadingCloud ? '0 0 8px var(--warning)' : '0 0 8px var(--success)',
+                flexShrink: 0
+              }} />
+              <span style={{ fontSize: '0.86rem', color: 'var(--petrol-dark)', fontWeight: 600 }}>
+                {isLoadingCloud
+                  ? 'Sincronizando respuestas enviadas desde celulares en tiempo real...'
+                  : `Respuestas en vivo sincronizadas con Google Sheets (${cloudParticipants.length} colaboradores recibidos desde móviles y otras sedes).`}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => fetchRemoteData(true)}
+              disabled={isLoadingCloud}
+              style={{
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: 'var(--petrol)',
+                borderColor: 'var(--turquoise)',
+                gap: '6px'
+              }}
+            >
+              <RefreshCw size={13} className={isLoadingCloud ? 'spin' : ''} />
+              <span>{isLoadingCloud ? 'Actualizando...' : 'Recargar Datos Ahora'}</span>
+            </button>
+          </div>
+
           {/* Barra de Filtros y Búsqueda */}
           <div className="card" style={{ padding: '16px' }}>
             <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1128,8 +1280,11 @@ export function AdminPortalView() {
               <div className="print-section" style={{ background: 'var(--gray-50)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--gray-200)' }}>
                 <strong style={{ color: '#059669', display: 'block', marginBottom: '6px' }}>8. DÍA 30 CIERRE — De Reto a Hábito:</strong>
                 <ul style={{ paddingLeft: '18px', margin: 0, color: 'var(--gray-700)', lineHeight: 1.5 }}>
-                  <li><strong>Historia final:</strong> {selectedParticipant.cierre_resultado || '—'}</li>
-                  <li><strong>Reconocimiento a compañero(a):</strong> {selectedParticipant.reconocimiento_persona || '—'} ({(selectedParticipant.reconocimiento_s || []).join(', ')})</li>
+                  <li><strong>Situación enfrentada:</strong> {selectedParticipant.cierre_situacion || '—'}</li>
+                  <li><strong>Acción realizada:</strong> {selectedParticipant.cierre_accion || '—'}</li>
+                  <li><strong>Qué pasó / Resultado:</strong> {selectedParticipant.cierre_resultado || '—'}</li>
+                  <li><strong>Aprendizaje obtenido:</strong> {selectedParticipant.cierre_aprendizaje || '—'}</li>
+                  <li><strong>Reconocimiento a compañero(a):</strong> {selectedParticipant.reconocimiento_persona || '—'} {selectedParticipant.reconocimiento_s?.length ? `(${selectedParticipant.reconocimiento_s.join(', ')})` : ''}</li>
                   <li><strong>Motivo del reconocimiento:</strong> {selectedParticipant.reconocimiento_motivo || '—'}</li>
                   <li><strong>Compromiso SER:</strong> {selectedParticipant.compromiso_ser || '—'}</li>
                   <li><strong>Compromiso SERVIR:</strong> {selectedParticipant.compromiso_servir || '—'}</li>
