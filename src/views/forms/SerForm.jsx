@@ -1,7 +1,7 @@
 import React from 'react';
 import { useReto } from '../../context/RetoContext';
 import { MisionesTable } from '../../components/MisionesTable';
-import { UserCheck } from 'lucide-react';
+import { UserCheck, Heart } from 'lucide-react';
 
 export function SerForm({ block }) {
   const { participant, updateField } = useReto();
@@ -28,6 +28,33 @@ export function SerForm({ block }) {
         <p style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--gray-800)', marginBottom: '16px' }}>
           {block.subtitulo}
         </p>
+
+        {/* Mi intención para estos 30 días */}
+        <div style={{
+          marginBottom: '22px',
+          padding: '16px',
+          background: 'var(--petrol-soft)',
+          borderRadius: 'var(--radius-md)',
+          border: '1.5px solid var(--turquoise-light)'
+        }}>
+          <label className="form-label" htmlFor="ser-intencion" style={{ color: 'var(--petrol-dark)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Heart size={16} color="var(--petrol)" />
+            <span>Mi intención para estos 30 días:</span>
+            <span style={{ color: 'var(--danger)' }}>*</span>
+          </label>
+          <small style={{ color: 'var(--gray-600)', display: 'block', marginBottom: '8px', fontSize: '0.85rem' }}>
+            ¿Qué propósito personal y de servicio te motiva en este reto? (Obligatorio para avanzar)
+          </small>
+          <textarea
+            id="ser-intencion"
+            className="form-textarea"
+            rows={2}
+            placeholder="Ej. Conectar genuinamente con mis compañeros, escuchar con empatía a cada cliente y aportar el 1% extra cada día."
+            value={participant.intencion_30_dias || ''}
+            onChange={(e) => updateField('intencion_30_dias', e.target.value)}
+            required
+          />
+        </div>
 
         {/* Las 3 Características */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>

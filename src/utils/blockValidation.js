@@ -28,6 +28,9 @@ export function validateBlockRequirements(blockId, participant = {}) {
 
   switch (block.tipoForm) {
     case 'ser': // Bloque 1 (Días 1 al 5)
+      if (isBlank(participant.intencion_30_dias)) {
+        missingFields.push('Mi intención para estos 30 días (Propósito personal)');
+      }
       if (isBlank(participant.ser_caracteristica_1)) {
         missingFields.push('Primera cualidad: "Quiero que me reconozcan como..."');
       }

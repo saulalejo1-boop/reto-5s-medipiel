@@ -70,6 +70,10 @@ export function OnboardingModal() {
       setError('Por favor escribe o pega el nombre de tu tienda o sede.');
       return;
     }
+    if (!intencion.trim()) {
+      setError('Por favor escribe tu intención para estos 30 días antes de comenzar.');
+      return;
+    }
     setError('');
     startParticipant(nombre, tienda, intencion);
   };
@@ -431,8 +435,9 @@ export function OnboardingModal() {
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                     <Heart size={16} color="var(--petrol)" />
                     Mi intención para estos 30 días:
+                    <span style={{ color: 'var(--danger)' }}>*</span>
                   </span>
-                  <small>¿Qué propósito personal y de servicio te motiva en este reto?</small>
+                  <small>¿Qué propósito personal y de servicio te motiva en este reto? (Obligatorio)</small>
                 </label>
                 <textarea
                   id="input-intencion"
@@ -441,6 +446,7 @@ export function OnboardingModal() {
                   placeholder="Ej. Conectar genuinamente con mis compañeros, escuchar con empatía a cada cliente y aportar el 1% extra cada día."
                   value={intencion}
                   onChange={(e) => setIntencion(e.target.value)}
+                  required
                 />
               </div>
 
