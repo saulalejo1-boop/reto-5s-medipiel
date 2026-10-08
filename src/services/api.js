@@ -359,21 +359,40 @@ export const api = {
    * Envía los datos del participante a Google Apps Script / Google Sheets
    */
   async syncWithGoogleSheets(participantData, useBeacon = false) {
-    const url = this.getScriptUrl();
-    if (!url) {
-      return { success: false, reason: "url_no_configurada" };
-    }
-
     const payload = {
       action: "sync_participant",
       app: "reto_5s",
       timestamp: new Date().toISOString(),
       participant: participantData
     };
-
     const payloadStr = JSON.stringify(payload);
 
-    // En móviles al cambiar de pestaña o cerrar el navegador, sendBeacon garantiza el envío
+    // 1. Intentar enviar a través del endpoint serverless /api/participants (sin problemas de CORS o ITP)
+    if (typeof window !== "undefined" && !useBeacon) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+        const proxyRes = await fetch("/api/participants", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payloadStr,
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (proxyRes.ok) {
+          return { success: true, method: "proxy" };
+        }
+      } catch (proxyErr) {
+        // Fallback al método tradicional si falla el proxy
+      }
+    }
+
+    const url = this.getScriptUrl();
+    if (!url) {
+      return { success: false, reason: "url_no_configurada" };
+    }
+
+    // 2. En móviles al cerrar navegador o pestaña, sendBeacon garantiza el envío
     if (useBeacon && typeof navigator !== "undefined" && navigator.sendBeacon) {
       try {
         const blob = new Blob([payloadStr], { type: "text/plain;charset=utf-8" });
@@ -384,8 +403,8 @@ export const api = {
       }
     }
 
+    // 3. Fallback directo a Google Apps Script con mode: 'no-cors'
     try {
-      // mode: 'no-cors' para evitar problemas de CORS en redirección a googleusercontent
       await fetch(url, {
         method: "POST",
         mode: "no-cors",
@@ -404,60 +423,104 @@ export const api = {
 
   /**
    * Consulta y descarga todos los participantes y sus respuestas guardadas en Google Sheets.
-   * Permite que el Portal de Administración y cualquier dispositivo vean las respuestas enviadas desde celulares.
+   * Utiliza primero la ruta serverless propia (/api/participants) para evitar bloqueos CORS y 
+   * problemas de redirección en Safari iOS y redes corporativas, con fallback directo a Google Apps Script.
    */
   async fetchParticipantsFromGoogleSheets() {
-    const url = this.getScriptUrl();
-    if (!url) {
-      return { success: false, error: "URL de Google Apps Script no configurada", participants: [] };
-    }
+    const directUrl = this.getScriptUrl();
+    const proxyUrl = "/api/participants";
 
-    try {
-      const fetchUrl = `${url}${url.includes('?') ? '&' : '?'}action=get_all&_t=${Date.now()}`;
-      const response = await fetch(fetchUrl, {
-        method: "GET",
-        headers: {
-          "Accept": "application/json"
-        }
-      });
+    let rawData = null;
+    let lastError = null;
 
-      if (!response.ok) {
-        throw new Error(`Error en servidor (HTTP ${response.status})`);
-      }
+    // Estrategia 1: Intentar mediante la Serverless Function de Vercel (/api/participants)
+    // Es same-origin: no tiene problemas de ITP, ni CORS, ni cuelgues de redirección 302 en iOS Safari
+    if (typeof window !== "undefined") {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 18000);
 
-      const data = await response.json();
-      if (data && data.status === "ok" && Array.isArray(data.participants)) {
-        const mapped = [];
-        for (const row of data.participants) {
-          try {
-            const p = mapSheetRowToParticipant(row);
-            if (p && p.nombre && p.nombre.length > 0) {
-              mapped.push(p);
-            }
-          } catch (rowErr) {
-            console.warn("Fila ignorada por formato incompatible:", rowErr, row);
+        const response = await fetch(`${proxyUrl}?_t=${Date.now()}`, {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json && json.status === "ok" && Array.isArray(json.participants)) {
+            rawData = json;
           }
         }
-
-        // Guardamos también en el directorio local de perfiles en lote para disponibilidad offline
-        this.saveProfilesBatch(mapped);
-
-        return {
-          success: true,
-          count: mapped.length,
-          participants: mapped
-        };
-      } else {
-        throw new Error(data.message || "Respuesta no compatible desde Google Sheets");
+      } catch (err) {
+        console.warn("Intento por proxy serverless falló, intentando enlace directo:", err.message);
+        lastError = err;
       }
-    } catch (error) {
-      console.warn("No se pudo descargar la lista de colaboradores desde Google Sheets:", error);
+    }
+
+    // Estrategia 2: Fallback directo al Web App de Google Apps Script
+    if (!rawData && directUrl) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 22000);
+
+        const fetchUrl = `${directUrl}${directUrl.includes('?') ? '&' : '?'}action=get_all&_t=${Date.now()}`;
+        const response = await fetch(fetchUrl, {
+          method: "GET",
+          headers: { "Accept": "application/json" },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const json = await response.json();
+          if (json && json.status === "ok" && Array.isArray(json.participants)) {
+            rawData = json;
+          }
+        } else {
+          throw new Error(`Google Sheets HTTP ${response.status}`);
+        }
+      } catch (err) {
+        console.warn("Intento directo a Google Apps Script falló:", err.message);
+        lastError = err;
+      }
+    }
+
+    if (rawData && Array.isArray(rawData.participants)) {
+      const mapped = [];
+      for (const row of rawData.participants) {
+        try {
+          const p = mapSheetRowToParticipant(row);
+          if (p && p.nombre && p.nombre.length > 0) {
+            mapped.push(p);
+          }
+        } catch (rowErr) {
+          console.warn("Fila ignorada por formato incompatible:", rowErr, row);
+        }
+      }
+
+      // Guardamos en el directorio local de perfiles en lote
+      this.saveProfilesBatch(mapped);
+
       return {
-        success: false,
-        error: error.message || "Error al conectar con Google Sheets",
-        participants: []
+        success: true,
+        count: mapped.length,
+        participants: mapped
       };
     }
+
+    const errorMsg = lastError
+      ? (lastError.name === "AbortError" 
+          ? "La conexión tardó demasiado tiempo en responder. Por favor presiona 'Recargar Datos Ahora'." 
+          : (lastError.message || "Error al conectar con Google Sheets"))
+      : "No se pudo obtener información de colaboradores desde Google Sheets";
+
+    return {
+      success: false,
+      error: errorMsg,
+      participants: []
+    };
   }
 };
 

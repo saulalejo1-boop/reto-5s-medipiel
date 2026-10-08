@@ -91,6 +91,8 @@ export function AdminPortalView() {
         }
       } else if (showNotification) {
         showToast(res?.error || 'No se pudieron descargar los datos remotos de Google Sheets.', 'warning');
+      } else if (!res?.success && (!res?.participants || res?.participants.length === 0)) {
+        showToast(res?.error || 'No se pudo sincronizar automáticamente. Presiona "Recargar Datos Ahora".', 'warning');
       }
     } catch (err) {
       if (showNotification) {
@@ -768,14 +770,16 @@ export function AdminPortalView() {
                 width: '10px',
                 height: '10px',
                 borderRadius: '50%',
-                background: isLoadingCloud ? 'var(--warning)' : 'var(--success)',
-                boxShadow: isLoadingCloud ? '0 0 8px var(--warning)' : '0 0 8px var(--success)',
+                background: isLoadingCloud ? 'var(--warning)' : (cloudParticipants.length > 0 ? 'var(--success)' : 'var(--danger)'),
+                boxShadow: isLoadingCloud ? '0 0 8px var(--warning)' : (cloudParticipants.length > 0 ? '0 0 8px var(--success)' : '0 0 8px var(--danger)'),
                 flexShrink: 0
               }} />
               <span style={{ fontSize: '0.86rem', color: 'var(--petrol-dark)', fontWeight: 600 }}>
                 {isLoadingCloud
                   ? 'Sincronizando respuestas enviadas desde celulares en tiempo real...'
-                  : `Respuestas en vivo sincronizadas con Google Sheets (${cloudParticipants.length} colaboradores recibidos desde móviles y otras sedes).`}
+                  : cloudParticipants.length > 0
+                    ? `Respuestas en vivo sincronizadas con Google Sheets (${cloudParticipants.length} colaboradores recibidos desde móviles y otras sedes).`
+                    : 'Aún no se han cargado respuestas remotas. Presiona "Recargar Datos Ahora" para sincronizar.'}
               </span>
             </div>
 
