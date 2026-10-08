@@ -9,7 +9,12 @@ const STORAGE_KEY_URL = "medipiel_reto5s_script_url";
 const STORAGE_KEY_OFFLINE_QUEUE = "medipiel_reto5s_offline_queue";
 
 // URL predeterminada de Google Apps Script (puede actualizarse desde la UI de ajustes)
-const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjG846ZHMSSyIbZ7cPfToyal89sZ4bpar-WfZm-EoypEkZ8_2BAyYD5wr8FVOYekYsvA/exec";
+export const DEFAULT_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwjG846ZHMSSyIbZ7cPfToyal89sZ4bpar-WfZm-EoypEkZ8_2BAyYD5wr8FVOYekYsvA/exec";
+
+// URLs anteriores que ya no son válidas o devuelven error 403
+const OLD_INVALID_URLS = [
+  "https://script.google.com/macros/s/AKfycbzQEYmmHsDzmtHE2eGQ97L2s2qymV2puhtGVAULVwFDlwzwX1wJmmFjuApgXmxEhqM/exec"
+];
 
 /**
  * Normaliza cadenas de texto para comparaciones sin distinción de mayúsculas o tildes
@@ -25,6 +30,14 @@ export function normalizeText(str) {
 }
 
 /**
+ * Convierte cualquier valor a string limpio sin lanzar excepciones
+ */
+export function safeStr(val) {
+  if (val === null || val === undefined) return "";
+  return String(val).trim();
+}
+
+/**
  * Plantilla inicial vacía para un nuevo participante
  */
 export function createEmptyParticipant(nombre = "", tienda = "", intencion = "") {
@@ -33,14 +46,14 @@ export function createEmptyParticipant(nombre = "", tienda = "", intencion = "")
 
   return {
     participant_id: id,
-    nombre: nombre.trim(),
-    tienda: tienda.trim(),
+    nombre: safeStr(nombre),
+    tienda: safeStr(tienda),
     fecha_inicio: now,
     fecha_ultima_actualizacion: now,
     dia_actual: 1,
     porcentaje_avance: 0,
     dias_completados: [],
-    intencion_30_dias: intencion.trim(),
+    intencion_30_dias: safeStr(intencion),
     meta_etapa1: "",
 
     // SER (1-5)
@@ -132,7 +145,12 @@ export const api = {
       if (typeof window !== "undefined" && window.localStorage) {
         const stored = localStorage.getItem(STORAGE_KEY_URL);
         if (stored && stored.trim().startsWith("http")) {
-          return stored.trim();
+          const trimmed = stored.trim();
+          if (OLD_INVALID_URLS.includes(trimmed)) {
+            localStorage.removeItem(STORAGE_KEY_URL);
+            return DEFAULT_SCRIPT_URL;
+          }
+          return trimmed;
         }
       }
     } catch (e) {
@@ -157,6 +175,20 @@ export const api = {
       console.error("Error al guardar URL de Apps Script", e);
       return false;
     }
+  },
+
+  /**
+   * Restablece la URL a la versión oficial predeterminada
+   */
+  resetScriptUrl() {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        localStorage.removeItem(STORAGE_KEY_URL);
+      }
+    } catch (e) {
+      console.warn("No se pudo limpiar STORAGE_KEY_URL", e);
+    }
+    return DEFAULT_SCRIPT_URL;
   },
 
   /**
@@ -221,6 +253,38 @@ export const api = {
       localStorage.setItem(STORAGE_KEY_PROFILES, JSON.stringify(profiles));
     } catch (e) {
       console.error("Error al guardar perfil en directorio", e);
+    }
+  },
+
+  /**
+   * Guarda o actualiza múltiples perfiles en lote eficientemente sin saturar LocalStorage
+   */
+  saveProfilesBatch(profilesList) {
+    if (!Array.isArray(profilesList) || profilesList.length === 0) return;
+    try {
+      let profiles = this.getSavedProfiles();
+      const map = new Map();
+      profiles.forEach(p => {
+        if (p && (p.participant_id || p.nombre)) {
+          const key = normalizeText(p.nombre) || p.participant_id;
+          map.set(key, p);
+        }
+      });
+      profilesList.forEach(p => {
+        if (p && (p.participant_id || p.nombre)) {
+          const key = normalizeText(p.nombre) || p.participant_id;
+          const existing = map.get(key);
+          map.set(key, existing ? { ...existing, ...p } : p);
+        }
+      });
+      const merged = Array.from(map.values());
+      try {
+        localStorage.setItem(STORAGE_KEY_PROFILES, JSON.stringify(merged));
+      } catch (quotaErr) {
+        console.warn("LocalStorage no pudo almacenar todos los perfiles por cuota excedida:", quotaErr);
+      }
+    } catch (e) {
+      console.error("Error al guardar perfiles en lote", e);
     }
   },
 
@@ -363,12 +427,20 @@ export const api = {
 
       const data = await response.json();
       if (data && data.status === "ok" && Array.isArray(data.participants)) {
-        const mapped = data.participants
-          .map(mapSheetRowToParticipant)
-          .filter(p => p && p.nombre && p.nombre.trim().length > 0);
+        const mapped = [];
+        for (const row of data.participants) {
+          try {
+            const p = mapSheetRowToParticipant(row);
+            if (p && p.nombre && p.nombre.length > 0) {
+              mapped.push(p);
+            }
+          } catch (rowErr) {
+            console.warn("Fila ignorada por formato incompatible:", rowErr, row);
+          }
+        }
 
-        // Guardamos también en el directorio local de perfiles para disponibilidad offline
-        mapped.forEach(p => this.saveProfileToDirectory(p));
+        // Guardamos también en el directorio local de perfiles en lote para disponibilidad offline
+        this.saveProfilesBatch(mapped);
 
         return {
           success: true,
@@ -392,13 +464,14 @@ export const api = {
 /**
  * Convierte una fila obtenida desde Google Sheets (con encabezados en español)
  * al objeto de datos de participante estándar de la aplicación.
+ * Es totalmente defensivo ante celdas numéricas, booleanas o vacías.
  */
 export function mapSheetRowToParticipant(row) {
   if (!row) return null;
 
   // Días completados
   let dias = [];
-  if (row["Días Completados (Lista)"]) {
+  if (row["Días Completados (Lista)"] != null) {
     const rawList = String(row["Días Completados (Lista)"]);
     dias = rawList
       .split(/[,;\s]+/)
@@ -408,7 +481,7 @@ export function mapSheetRowToParticipant(row) {
 
   // Tipos de ayuda en SERVIR
   let servirAyuda = [];
-  if (row["SERVIR - Tipos de Ayuda"]) {
+  if (row["SERVIR - Tipos de Ayuda"] != null) {
     servirAyuda = String(row["SERVIR - Tipos de Ayuda"])
       .split(/[,;]+/)
       .map(s => s.trim())
@@ -417,7 +490,7 @@ export function mapSheetRowToParticipant(row) {
 
   // Reto integrado S
   let retoS = [];
-  if (row["RETO INTEGRADO - S Combinadas"]) {
+  if (row["RETO INTEGRADO - S Combinadas"] != null) {
     retoS = String(row["RETO INTEGRADO - S Combinadas"])
       .split(/[,;]+/)
       .map(s => s.trim())
@@ -426,7 +499,7 @@ export function mapSheetRowToParticipant(row) {
 
   // Reconocimiento S
   let recoS = [];
-  if (row["RECONOCIMIENTO - S Destacada"]) {
+  if (row["RECONOCIMIENTO - S Destacada"] != null) {
     recoS = String(row["RECONOCIMIENTO - S Destacada"])
       .split(/[,;]+/)
       .map(s => s.trim())
@@ -439,94 +512,94 @@ export function mapSheetRowToParticipant(row) {
     : (dias.length ? Math.min(100, Math.round((dias.length / 30) * 100)) : 0);
 
   return {
-    participant_id: row["ID Participante"] || `mdp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    nombre: (row["Nombre Completo"] || "").trim(),
-    tienda: (row["Tienda / Sede"] || "").trim(),
-    fecha_inicio: row["Fecha Inicio"] || "",
-    fecha_ultima_actualizacion: row["Última Actualización"] || new Date().toISOString(),
+    participant_id: safeStr(row["ID Participante"]) || `mdp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    nombre: safeStr(row["Nombre Completo"]),
+    tienda: safeStr(row["Tienda / Sede"]),
+    fecha_inicio: safeStr(row["Fecha Inicio"]),
+    fecha_ultima_actualizacion: safeStr(row["Última Actualización"]) || new Date().toISOString(),
     dia_actual: parseInt(row["Día Actual"], 10) || (dias.length ? Math.min(30, Math.max(...dias, 1)) : 1),
     porcentaje_avance: porcentaje,
     dias_completados: dias,
-    intencion_30_dias: row["Intención 30 Días"] || "",
+    intencion_30_dias: safeStr(row["Intención 30 Días"]),
     meta_etapa1: "",
 
     // SER
-    ser_caracteristica_1: row["SER - Característica 1"] || "",
-    ser_caracteristica_2: row["SER - Característica 2"] || "",
-    ser_caracteristica_3: row["SER - Característica 3"] || "",
-    ser_accion: row["SER - Acción Concreta"] || "",
-    ser_descubrimiento: row["SER - Qué descubrí de mí"] || "",
+    ser_caracteristica_1: safeStr(row["SER - Característica 1"]),
+    ser_caracteristica_2: safeStr(row["SER - Característica 2"]),
+    ser_caracteristica_3: safeStr(row["SER - Característica 3"]),
+    ser_accion: safeStr(row["SER - Acción Concreta"]),
+    ser_descubrimiento: safeStr(row["SER - Qué descubrí de mí"]),
 
     // SERVIR
     servir_tipos_ayuda: servirAyuda,
-    servir_a_quien: row["SERVIR - A quién apoyé"] || "",
-    servir_necesidad: row["SERVIR - Necesidad observada"] || "",
-    servir_que_hice: row["SERVIR - Qué hice"] || "",
-    servir_cambio: row["SERVIR - Qué cambió"] || "",
+    servir_a_quien: safeStr(row["SERVIR - A quién apoyé"]),
+    servir_necesidad: safeStr(row["SERVIR - Necesidad observada"]),
+    servir_que_hice: safeStr(row["SERVIR - Qué hice"]),
+    servir_cambio: safeStr(row["SERVIR - Qué cambió"]),
 
     // SABER
-    saber_que_ensene: row["SABER - Qué enseñé y a quién"] || "",
-    saber_a_quien: row["SABER - A quién apoyé"] || "",
-    saber_que_aprendi: row["SABER - Qué aprendí de otro"] || "",
-    saber_donde_aplicar: row["SABER - Dónde lo aplicaré"] || "",
+    saber_que_ensene: safeStr(row["SABER - Qué enseñé y a quién"]),
+    saber_a_quien: safeStr(row["SABER - A quién apoyé"]),
+    saber_que_aprendi: safeStr(row["SABER - Qué aprendí de otro"]),
+    saber_donde_aplicar: safeStr(row["SABER - Dónde lo aplicaré"]),
 
     // DÍA 15
-    dia15_historia: row["D15 - Historia 1 minuto"] || "",
-    dia15_rojo: row["D15 - Semáforo Rojo (Dejar de hacer)"] || "",
-    dia15_amarillo: row["D15 - Semáforo Amarillo (Mejorar)"] || "",
-    dia15_verde: row["D15 - Semáforo Verde (Mantener)"] || "",
+    dia15_historia: safeStr(row["D15 - Historia 1 minuto"]),
+    dia15_rojo: safeStr(row["D15 - Semáforo Rojo (Dejar de hacer)"]),
+    dia15_amarillo: safeStr(row["D15 - Semáforo Amarillo (Mejorar)"]),
+    dia15_verde: safeStr(row["D15 - Semáforo Verde (Mantener)"]),
     dia15_ser: parseInt(row["D15 - Termómetro SER (1-5)"], 10) || 4,
     dia15_servir: parseInt(row["D15 - Termómetro SERVIR (1-5)"], 10) || 4,
     dia15_saber: parseInt(row["D15 - Termómetro SABER (1-5)"], 10) || 4,
     dia15_sonreir: parseInt(row["D15 - Termómetro SONREÍR (1-5)"], 10) || 4,
     dia15_sorprender: parseInt(row["D15 - Termómetro SORPRENDER (1-5)"], 10) || 4,
-    dia15_s_fortalecer: row["D15 - S a Fortalecer"] || "",
-    dia15_comportamiento: row["D15 - Comportamiento de salida"] || "",
+    dia15_s_fortalecer: safeStr(row["D15 - S a Fortalecer"]),
+    dia15_comportamiento: safeStr(row["D15 - Comportamiento de salida"]),
     meta_etapa2: "",
 
     // SONREÍR
-    sonreir_reconocimiento: String(row["SONREÍR - Reconocí algo positivo"]).toUpperCase() === "SÍ" || Boolean(row["SONREÍR - Reconocí algo positivo"]),
-    sonreir_queja: String(row["SONREÍR - Transformé queja en propuesta"]).toUpperCase() === "SÍ",
-    sonreir_ambiente: String(row["SONREÍR - Mejoré el ambiente"]).toUpperCase() === "SÍ",
-    sonreir_situacion: row["SONREÍR - Situación transformada"] || "",
-    sonreir_reaccion: row["SONREÍR - Reacción antes vs ahora"] || "",
-    sonreir_efecto: row["SONREÍR - Efecto logrado"] || "",
+    sonreir_reconocimiento: String(row["SONREÍR - Reconocí algo positivo"] || "").trim().toUpperCase() === "SÍ" || row["SONREÍR - Reconocí algo positivo"] === true,
+    sonreir_queja: String(row["SONREÍR - Transformé queja en propuesta"] || "").trim().toUpperCase() === "SÍ" || row["SONREÍR - Transformé queja en propuesta"] === true,
+    sonreir_ambiente: String(row["SONREÍR - Mejoré el ambiente"] || "").trim().toUpperCase() === "SÍ" || row["SONREÍR - Mejoré el ambiente"] === true,
+    sonreir_situacion: safeStr(row["SONREÍR - Situación transformada"]),
+    sonreir_reaccion: safeStr(row["SONREÍR - Reacción antes vs ahora"]),
+    sonreir_efecto: safeStr(row["SONREÍR - Efecto logrado"]),
 
     // SORPRENDER
-    sorprender_oportunidad: row["SORPRENDER - Oportunidad cotidiana"] || "",
-    sorprender_idea: row["SORPRENDER - Idea 1% extra"] || "",
-    sorprender_prueba: row["SORPRENDER - Prueba y qué pasó"] || "",
-    sorprender_resultado: row["SORPRENDER - Resultado (Funcionó)"] || "",
-    sorprender_y_si: row["SORPRENDER - Banco de ideas (¿Y si nosotros...?)"] || "",
+    sorprender_oportunidad: safeStr(row["SORPRENDER - Oportunidad cotidiana"]),
+    sorprender_idea: safeStr(row["SORPRENDER - Idea 1% extra"]),
+    sorprender_prueba: safeStr(row["SORPRENDER - Prueba y qué pasó"]),
+    sorprender_resultado: safeStr(row["SORPRENDER - Resultado (Funcionó)"]),
+    sorprender_y_si: safeStr(row["SORPRENDER - Banco de ideas (¿Y si nosotros...?)"]),
 
     // RETO INTEGRADO
     reto_integrado_s: retoS,
-    reto_integrado_accion: row["RETO INTEGRADO - Acción"] || "",
-    reto_integrado_beneficiario: row["RETO INTEGRADO - Beneficiario"] || "",
-    reto_integrado_resultado: row["RETO INTEGRADO - Resultado"] || "",
-    reto_integrado_aprendizaje: row["RETO INTEGRADO - Enseñanza"] || "",
+    reto_integrado_accion: safeStr(row["RETO INTEGRADO - Acción"]),
+    reto_integrado_beneficiario: safeStr(row["RETO INTEGRADO - Beneficiario"]),
+    reto_integrado_resultado: safeStr(row["RETO INTEGRADO - Resultado"]),
+    reto_integrado_aprendizaje: safeStr(row["RETO INTEGRADO - Enseñanza"]),
 
     // PASAPORTE
-    pasaporte_momento_favorito: row["PASAPORTE - Momento Favorito y S"] || "",
+    pasaporte_momento_favorito: safeStr(row["PASAPORTE - Momento Favorito y S"]),
 
     // CIERRE
-    cierre_situacion: row["CIERRE - Situación"] || "",
-    cierre_accion: row["CIERRE - Acción"] || "",
-    cierre_resultado: row["CIERRE - Resultado"] || "",
-    cierre_aprendizaje: row["CIERRE - Aprendizaje"] || "",
+    cierre_situacion: safeStr(row["CIERRE - Situación"]),
+    cierre_accion: safeStr(row["CIERRE - Acción"]),
+    cierre_resultado: safeStr(row["CIERRE - Resultado"]),
+    cierre_aprendizaje: safeStr(row["CIERRE - Aprendizaje"]),
 
     // RECONOCIMIENTO
-    reconocimiento_persona: row["RECONOCIMIENTO - Persona"] || "",
+    reconocimiento_persona: safeStr(row["RECONOCIMIENTO - Persona"]),
     reconocimiento_s: recoS,
-    reconocimiento_motivo: row["RECONOCIMIENTO - Motivo"] || "",
+    reconocimiento_motivo: safeStr(row["RECONOCIMIENTO - Motivo"]),
 
     // COMPROMISOS
-    compromiso_ser: row["COMPROMISO - SER"] || "",
-    compromiso_servir: row["COMPROMISO - SERVIR"] || "",
-    compromiso_saber: row["COMPROMISO - SABER"] || "",
-    compromiso_sonreir: row["COMPROMISO - SONREÍR"] || "",
-    compromiso_sorprender: row["COMPROMISO - SORPRENDER"] || "",
-    compromiso_30_dias: row["COMPROMISO - 30 Días Siguientes"] || "",
-    fecha_finalizacion: row["Fecha Finalización"] || ""
+    compromiso_ser: safeStr(row["COMPROMISO - SER"]),
+    compromiso_servir: safeStr(row["COMPROMISO - SERVIR"]),
+    compromiso_saber: safeStr(row["COMPROMISO - SABER"]),
+    compromiso_sonreir: safeStr(row["COMPROMISO - SONREÍR"]),
+    compromiso_sorprender: safeStr(row["COMPROMISO - SORPRENDER"]),
+    compromiso_30_dias: safeStr(row["COMPROMISO - 30 Días Siguientes"]),
+    fecha_finalizacion: safeStr(row["Fecha Finalización"])
   };
 }

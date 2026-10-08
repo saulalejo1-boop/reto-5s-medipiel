@@ -116,23 +116,23 @@ export function AdminPortalView() {
     if (Array.isArray(savedProfiles)) {
       savedProfiles.forEach(p => {
         if (p && (p.participant_id || p.nombre)) {
-          const key = (p.nombre || '').toLowerCase().trim();
+          const key = String(p.nombre || p.participant_id || '').toLowerCase().trim();
           if (key) map.set(key, p);
         }
       });
     }
 
     // 2. Agregar sesión local activa si tiene nombre
-    if (participant && participant.nombre && participant.nombre.trim().length > 0) {
-      const key = participant.nombre.toLowerCase().trim();
+    if (participant && participant.nombre && String(participant.nombre).trim().length > 0) {
+      const key = String(participant.nombre).toLowerCase().trim();
       map.set(key, participant);
     }
 
     // 3. Agregar o actualizar con los datos descargados en vivo desde Google Sheets (celulares y otras sedes)
     if (Array.isArray(cloudParticipants)) {
       cloudParticipants.forEach(cp => {
-        if (cp && cp.nombre && cp.nombre.trim().length > 0) {
-          const key = cp.nombre.toLowerCase().trim();
+        if (cp && cp.nombre && String(cp.nombre).trim().length > 0) {
+          const key = String(cp.nombre).toLowerCase().trim();
           const existing = map.get(key);
           if (!existing) {
             map.set(key, cp);
@@ -192,9 +192,9 @@ export function AdminPortalView() {
     return compl.includes(15);
   }).length;
 
-  // Filtrado de participantes
+  // Filtrado y ordenamiento de participantes (los más recientes primero)
   const filteredParticipants = useMemo(() => {
-    return allParticipants.filter(p => {
+    const list = allParticipants.filter(p => {
       const matchSearch =
         (p.nombre || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.tienda || '').toLowerCase().includes(searchQuery.toLowerCase());
@@ -208,6 +208,12 @@ export function AdminPortalView() {
       if (filterStatus === 'dia15') return compl.includes(15);
       if (filterStatus === 'en_curso') return pct < 100;
       return true;
+    });
+
+    return list.sort((a, b) => {
+      const tA = a.fecha_ultima_actualizacion ? new Date(a.fecha_ultima_actualizacion).getTime() : 0;
+      const tB = b.fecha_ultima_actualizacion ? new Date(b.fecha_ultima_actualizacion).getTime() : 0;
+      return tB - tA;
     });
   }, [allParticipants, searchQuery, filterStatus]);
 
@@ -228,6 +234,15 @@ export function AdminPortalView() {
     } else {
       showToast('Ingresa una URL válida que empiece por https://', 'warning');
     }
+  };
+
+  // Restablecer URL oficial por defecto
+  const handleResetUrl = () => {
+    const defaultUrl = api.resetScriptUrl();
+    setCustomScriptUrl(defaultUrl);
+    setConnectionStatus(null);
+    showToast('URL oficial restablecida. Sincronizando datos...', 'info');
+    fetchRemoteData(true);
   };
 
   // Probar conexión con Google Apps Script
@@ -276,6 +291,29 @@ export function AdminPortalView() {
       api.deleteSavedProfile(participantId);
       if (refreshProfiles) refreshProfiles();
       showToast(`Registro de "${nombre}" eliminado.`, 'info');
+    }
+  };
+
+  // Formateadores seguros de fecha
+  const formatDateShort = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const d = new Date(dateStr);
+      return isNaN(d.getTime())
+        ? String(dateStr)
+        : d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return String(dateStr);
+    }
+  };
+
+  const formatDateFull = (dateStr) => {
+    if (!dateStr) return '—';
+    try {
+      const d = new Date(dateStr);
+      return isNaN(d.getTime()) ? String(dateStr) : d.toLocaleString();
+    } catch (e) {
+      return String(dateStr);
     }
   };
 
@@ -896,9 +934,7 @@ export function AdminPortalView() {
                           </td>
 
                           <td style={{ padding: '14px 18px', color: 'var(--gray-500)', fontSize: '0.8rem' }}>
-                            {p.fecha_ultima_actualizacion
-                              ? new Date(p.fecha_ultima_actualizacion).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                              : '—'}
+                            {formatDateShort(p.fecha_ultima_actualizacion)}
                           </td>
 
                           <td style={{ padding: '14px 18px', textAlign: 'right' }}>
@@ -1065,6 +1101,17 @@ export function AdminPortalView() {
                 <button
                   type="button"
                   className="btn btn-outline btn-sm"
+                  onClick={handleResetUrl}
+                  style={{ gap: '6px' }}
+                  title="Restablecer la URL oficial del backend de Medipiel"
+                >
+                  <RefreshCw size={14} />
+                  <span>Restablecer URL Oficial</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
                   onClick={handleTestConnection}
                   disabled={isTestingConnection}
                   style={{ gap: '6px' }}
@@ -1152,7 +1199,7 @@ export function AdminPortalView() {
                 <div style={{ display: 'flex', gap: '14px', fontSize: '0.86rem', color: 'var(--gray-600)', flexWrap: 'wrap' }}>
                   <span>📍 <strong>Tienda:</strong> {selectedParticipant.tienda || 'Sin sede'}</span>
                   <span>📊 <strong>Avance:</strong> {selectedParticipant.porcentaje_avance || 0}% ({(selectedParticipant.dias_completados || []).length}/30 días)</span>
-                  <span>🕒 <strong>Última fecha:</strong> {selectedParticipant.fecha_ultima_actualizacion ? new Date(selectedParticipant.fecha_ultima_actualizacion).toLocaleString() : '—'}</span>
+                  <span>🕒 <strong>Última fecha:</strong> {formatDateFull(selectedParticipant.fecha_ultima_actualizacion)}</span>
                 </div>
               </div>
 
