@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useReto } from '../context/RetoContext';
 import { api } from '../services/api';
-import { exportParticipantsToCsv } from '../utils/exportCsv';
+import { exportParticipantsToExcel } from '../utils/exportExcel';
 import {
   ShieldCheck,
   Lock,
@@ -218,11 +218,11 @@ export function AdminPortalView() {
     });
   }, [allParticipants, searchQuery, filterStatus]);
 
-  // Exportar a CSV
-  const handleExportCsv = () => {
+  // Exportar a Excel (.xlsx nativo con pestañas organizadas)
+  const handleExportExcel = () => {
     const dateStr = new Date().toISOString().split('T')[0];
-    exportParticipantsToCsv(allParticipants, `Reporte_Reto_5S_Medipiel_${dateStr}.csv`);
-    showToast('Informe completo descargado exitosamente.', 'success');
+    exportParticipantsToExcel(allParticipants, `Reporte_Reto_5S_Medipiel_${dateStr}.xlsx`);
+    showToast('Informe completo en Excel (.xlsx) descargado exitosamente.', 'success');
   };
 
   // Guardar URL de Google Apps Script
@@ -523,7 +523,7 @@ export function AdminPortalView() {
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={handleExportCsv}
+                onClick={handleExportExcel}
                 style={{
                   background: 'var(--turquoise)',
                   color: 'var(--petrol)',
@@ -533,10 +533,10 @@ export function AdminPortalView() {
                   borderRadius: 'var(--radius-full)',
                   boxShadow: '0 4px 14px rgba(45, 204, 211, 0.25)'
                 }}
-                title="Descargar informe completo en Excel (.CSV)"
+                title="Descargar informe completo en formato Excel (.xlsx)"
               >
                 <Download size={16} />
-                <span>Descargar Informe Excel (.CSV)</span>
+                <span>Descargar Informe Excel (.XLSX)</span>
               </button>
             </div>
 
@@ -1005,22 +1005,21 @@ export function AdminPortalView() {
 
               <div style={{ flex: 1, minWidth: '280px' }}>
                 <h3 style={{ fontSize: '1.25rem', color: 'var(--petrol)', marginBottom: '6px' }}>
-                  Informe Completo por Colaborador en Excel (.CSV)
+                  Informe Completo por Colaborador en Excel (.XLSX)
                 </h3>
                 <p style={{ fontSize: '0.9rem', color: 'var(--gray-600)', lineHeight: 1.5, marginBottom: '16px' }}>
-                  Genera y descarga un archivo estructurado con formato UTF-8 (compatible con Microsoft Excel y Google Sheets).
-                  Cada fila representa a un colaborador e incluye sus datos de identificación, avance general y **todas las respuestas y reflexiones de la cartilla (SER, SERVIR, SABER, DÍA 15, SONREÍR, SORPRENDER, RETO INTEGRADO y DÍA 30)** en columnas separadas.
+                  Genera y descarga un libro nativo de Microsoft Excel (.xlsx) organizado en pestañas individuales: <strong>Resumen Ejecutivo</strong> (con desglose y métricas por tienda), <strong>Directorio General</strong> y <strong>Respuestas y Reflexiones 5S</strong> (SER, SERVIR, SABER, DÍA 15, SONREÍR, SORPRENDER, RETO INTEGRADO, DÍA 30 y COMPROMISOS). Listo para abrir con doble clic y totalmente ordenado en columnas legibles.
                 </p>
 
                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     className="btn btn-primary btn-lg"
-                    onClick={handleExportCsv}
+                    onClick={handleExportExcel}
                     style={{ gap: '8px' }}
                   >
                     <Download size={18} />
-                    <span>Descargar Informe Completo en Excel (.CSV)</span>
+                    <span>Descargar Informe Completo en Excel (.XLSX)</span>
                   </button>
 
                   <a
