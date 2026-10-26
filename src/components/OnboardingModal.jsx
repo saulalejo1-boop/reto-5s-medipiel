@@ -9,9 +9,6 @@ import {
   ArrowRight,
   X,
   LogOut,
-  Users,
-  PlusCircle,
-  Trash2,
   CheckCircle2,
   ShieldCheck
 } from 'lucide-react';
@@ -24,21 +21,28 @@ export function OnboardingModal() {
     setIsOnboardingOpen,
     setActiveTab,
     logout,
-    savedProfiles = [],
-    switchProfile,
-    deleteProfile
+    savedProfiles = []
   } = useReto();
 
   const isExistingUser = Boolean(participant.nombre && participant.nombre.trim().length > 0);
-
-  const [activeMode, setActiveMode] = useState(() => {
-    return isExistingUser ? 'editar' : savedProfiles.length > 0 ? 'seleccionar' : 'nuevo';
-  });
 
   const [nombre, setNombre] = useState(participant.nombre || '');
   const [tienda, setTienda] = useState(participant.tienda || '');
   const [intencion, setIntencion] = useState(participant.intencion_30_dias || '');
   const [error, setError] = useState('');
+
+  // Sincronizar campos cuando cambia el participante activo o se abre el modal
+  useEffect(() => {
+    if (participant && participant.nombre) {
+      setNombre(participant.nombre);
+      setTienda(participant.tienda || '');
+      setIntencion(participant.intencion_30_dias || '');
+    } else {
+      setNombre('');
+      setTienda('');
+      setIntencion('');
+    }
+  }, [participant, isOnboardingOpen]);
 
   // Detección automática en tiempo real del perfil según el nombre escrito
   const normalizedInputName = normalizeText(nombre);
@@ -81,7 +85,10 @@ export function OnboardingModal() {
   const handleLogout = () => {
     if (window.confirm("¿Deseas salir de tu reto? Tu progreso quedará guardado para que puedas continuar después.")) {
       logout();
-      setActiveMode('seleccionar');
+      setNombre('');
+      setTienda('');
+      setIntencion('');
+      setError('');
     }
   };
 
@@ -180,317 +187,150 @@ export function OnboardingModal() {
           </div>
         </div>
 
-        {/* Selector de modo si no hay sesión activa y hay perfiles guardados */}
-        {!isExistingUser && savedProfiles.length > 0 && (
+        {error && (
           <div style={{
-            display: 'flex',
-            background: 'var(--gray-100)',
-            borderRadius: 'var(--radius-md)',
-            padding: '4px',
-            marginBottom: '20px'
+            background: 'var(--danger-light)',
+            color: 'var(--danger)',
+            padding: '10px 16px',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.88rem',
+            marginBottom: '16px',
+            fontWeight: 600
           }}>
-            <button
-              type="button"
-              onClick={() => setActiveMode('seleccionar')}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '0.88rem',
-                fontWeight: 700,
-                border: 'none',
-                background: activeMode === 'seleccionar' ? 'var(--white)' : 'transparent',
-                color: activeMode === 'seleccionar' ? 'var(--petrol)' : 'var(--gray-600)',
-                boxShadow: activeMode === 'seleccionar' ? 'var(--shadow-sm)' : 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px'
-              }}
-            >
-              <Users size={16} />
-              <span>Continuar mi Reto</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setActiveMode('nuevo');
-                setNombre('');
-                setTienda('');
-                setIntencion('');
-              }}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '0.88rem',
-                fontWeight: 700,
-                border: 'none',
-                background: activeMode === 'nuevo' ? 'var(--white)' : 'transparent',
-                color: activeMode === 'nuevo' ? 'var(--petrol)' : 'var(--gray-600)',
-                boxShadow: activeMode === 'nuevo' ? 'var(--shadow-sm)' : 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px'
-              }}
-            >
-              <PlusCircle size={16} />
-              <span>Ingresar con mi nombre</span>
-            </button>
+            {error}
           </div>
         )}
 
-        {/* MODO SELECCIONAR PERFIL GUARDADO */}
-        {!isExistingUser && activeMode === 'seleccionar' && savedProfiles.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--gray-600)' }}>
-              Selecciona tu nombre para continuar donde quedaste:
-            </span>
+        <form onSubmit={handleSubmit}>
+          {/* Nombre Completo */}
+          <div className="form-group">
+            <label className="form-label" htmlFor="input-nombre">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <User size={16} color="var(--petrol)" />
+                Nombre completo:
+              </span>
+              {!isExistingUser && (
+                <small>Si ya habías comenzado, escribe tu nombre para recuperar tu progreso automáticamente.</small>
+              )}
+            </label>
+            <input
+              id="input-nombre"
+              type="text"
+              className="form-input"
+              placeholder="Ej. María Camila Gómez"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              required
+            />
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '280px', overflowY: 'auto' }}>
-              {savedProfiles.map(p => {
-                const initials = p.nombre
-                  ? p.nombre.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()
-                  : 'MP';
-
-                return (
-                  <div
-                    key={p.participant_id}
-                    onClick={() => switchProfile(p)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '12px',
-                      padding: '12px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      border: '1.5px solid var(--gray-200)',
-                      background: 'var(--white)',
-                      cursor: 'pointer',
-                      transition: 'var(--transition-fast)'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--turquoise)'}
-                    onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--gray-200)'}
-                  >
-                    <div style={{
-                      width: '38px',
-                      height: '38px',
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, var(--turquoise) 0%, var(--petrol) 100%)',
-                      color: '#fff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 700,
-                      fontSize: '0.9rem'
-                    }}>
-                      {initials}
-                    </div>
-
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <strong style={{ fontSize: '0.95rem', color: 'var(--gray-800)', display: 'block' }}>
-                        {p.nombre}
-                      </strong>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>
-                        {p.tienda || 'Medipiel'} · {p.porcentaje_avance || 0}% completado
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`¿Eliminar el perfil de ${p.nombre} de este dispositivo?`)) {
-                          deleteProfile(p.participant_id);
-                        }
-                      }}
-                      title="Eliminar perfil"
-                      style={{
-                        padding: '6px',
-                        color: 'var(--gray-400)',
-                        borderRadius: 'var(--radius-sm)'
-                      }}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-
-                    <div style={{ color: 'var(--petrol)', display: 'flex', alignItems: 'center' }}>
-                      <ArrowRight size={18} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => {
-                setActiveMode('nuevo');
-                setNombre('');
-                setTienda('');
-                setIntencion('');
-              }}
-              style={{ marginTop: '8px', gap: '8px' }}
-            >
-              <PlusCircle size={16} />
-              <span>Ingresar como otro colaborador</span>
-            </button>
-          </div>
-        )}
-
-        {/* MODO FORMULARIO (NUEVO O EDITAR) */}
-        {(isExistingUser || activeMode === 'nuevo' || savedProfiles.length === 0) && (
-          <>
-            {error && (
+            {/* Banner de reconocimiento de progreso previo en tiempo real */}
+            {matchedProfile && (
               <div style={{
-                background: 'var(--danger-light)',
-                color: 'var(--danger)',
-                padding: '10px 16px',
-                borderRadius: 'var(--radius-sm)',
-                fontSize: '0.88rem',
-                marginBottom: '16px',
-                fontWeight: 600
+                marginTop: '10px',
+                padding: '12px 14px',
+                background: 'linear-gradient(135deg, rgba(45, 204, 211, 0.14) 0%, rgba(1, 96, 109, 0.08) 100%)',
+                border: '1.5px solid var(--turquoise)',
+                borderRadius: 'var(--radius-md)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '10px'
               }}>
-                {error}
+                <CheckCircle2 size={20} color="var(--petrol)" style={{ flexShrink: 0, marginTop: '2px' }} />
+                <div style={{ fontSize: '0.86rem' }}>
+                  <strong style={{ color: 'var(--petrol)', display: 'block' }}>
+                    ¡Hola de nuevo, {matchedProfile.nombre}!
+                  </strong>
+                  <span style={{ color: 'var(--gray-700)', display: 'block', marginTop: '2px' }}>
+                    Encontramos tu progreso: <strong>{matchedProfile.porcentaje_avance || 0}% de avance</strong> ({matchedProfile.dias_completados?.length || 0} de 30 días completados).
+                  </span>
+                  <span style={{ color: 'var(--gray-500)', fontSize: '0.78rem', display: 'block', marginTop: '4px' }}>
+                    {matchedProfile.tienda ? `Tienda asociada: "${matchedProfile.tienda}". Puedes cambiarla o dejarla igual.` : 'Al continuar recuperarás todas tus respuestas y sellos.'}
+                  </span>
+                </div>
               </div>
             )}
+          </div>
 
-            <form onSubmit={handleSubmit}>
-              {/* Nombre Completo */}
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-nombre">
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <User size={16} color="var(--petrol)" />
-                    Nombre completo:
-                  </span>
-                  {!isExistingUser && (
-                    <small>Si ya habías comenzado, escribe tu nombre para recuperar tu progreso automáticamente.</small>
-                  )}
-                </label>
-                <input
-                  id="input-nombre"
-                  type="text"
-                  className="form-input"
-                  placeholder="Ej. María Camila Gómez"
-                  value={nombre}
-                  onChange={(e) => setNombre(e.target.value)}
-                  required
-                />
+          {/* Tienda / Sede (Campo abierto para copiar/pegar o escribir libremente sin desplegable) */}
+          <div className="form-group">
+            <label className="form-label" htmlFor="input-tienda">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <MapPin size={16} color="var(--petrol)" />
+                Tienda o Sede:
+              </span>
+              <small>Copia y pega o escribe el nombre de tu tienda, punto de venta o sede.</small>
+            </label>
+            <input
+              id="input-tienda"
+              type="text"
+              className="form-input"
+              placeholder="Escribe o pega aquí tu tienda o sede..."
+              value={tienda}
+              onChange={(e) => setTienda(e.target.value)}
+              required
+            />
+          </div>
 
-                {/* Banner de reconocimiento de progreso previo en tiempo real */}
-                {matchedProfile && (
-                  <div style={{
-                    marginTop: '10px',
-                    padding: '12px 14px',
-                    background: 'linear-gradient(135deg, rgba(45, 204, 211, 0.14) 0%, rgba(1, 96, 109, 0.08) 100%)',
-                    border: '1.5px solid var(--turquoise)',
-                    borderRadius: 'var(--radius-md)',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '10px'
-                  }}>
-                    <CheckCircle2 size={20} color="var(--petrol)" style={{ flexShrink: 0, marginTop: '2px' }} />
-                    <div style={{ fontSize: '0.86rem' }}>
-                      <strong style={{ color: 'var(--petrol)', display: 'block' }}>
-                        ¡Hola de nuevo, {matchedProfile.nombre}!
-                      </strong>
-                      <span style={{ color: 'var(--gray-700)', display: 'block', marginTop: '2px' }}>
-                        Encontramos tu progreso: <strong>{matchedProfile.porcentaje_avance || 0}% de avance</strong> ({matchedProfile.dias_completados?.length || 0} de 30 días completados).
-                      </span>
-                      <span style={{ color: 'var(--gray-500)', fontSize: '0.78rem', display: 'block', marginTop: '4px' }}>
-                        {matchedProfile.tienda ? `Tienda asociada: "${matchedProfile.tienda}". Puedes cambiarla o dejarla igual.` : 'Al continuar recuperarás todas tus respuestas y sellos.'}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
+          {/* Mi intención para estos 30 días */}
+          <div className="form-group">
+            <label className="form-label" htmlFor="input-intencion">
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <Heart size={16} color="var(--petrol)" />
+                Mi intención para estos 30 días:
+                <span style={{ color: 'var(--danger)' }}>*</span>
+              </span>
+              <small>¿Qué propósito personal y de servicio te motiva en este reto? (Obligatorio)</small>
+            </label>
+            <textarea
+              id="input-intencion"
+              className="form-textarea"
+              rows={2}
+              placeholder="Ej. Conectar genuinamente con mis compañeros, escuchar con empatía a cada cliente y aportar el 1% extra cada día."
+              value={intencion}
+              onChange={(e) => setIntencion(e.target.value)}
+              required
+            />
+          </div>
 
-              {/* Tienda / Sede (Campo abierto para copiar/pegar o escribir libremente sin desplegable) */}
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-tienda">
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <MapPin size={16} color="var(--petrol)" />
-                    Tienda o Sede:
-                  </span>
-                  <small>Copia y pega o escribe el nombre de tu tienda, punto de venta o sede.</small>
-                </label>
-                <input
-                  id="input-tienda"
-                  type="text"
-                  className="form-input"
-                  placeholder="Escribe o pega aquí tu tienda o sede..."
-                  value={tienda}
-                  onChange={(e) => setTienda(e.target.value)}
-                  required
-                />
-              </div>
+          {/* Action Button */}
+          <button
+            type="submit"
+            className="btn btn-primary btn-lg"
+            style={{ width: '100%', gap: '10px' }}
+          >
+            <span>
+              {isExistingUser
+                ? 'Guardar y Continuar'
+                : matchedProfile
+                  ? `Continuar mi Reto (${matchedProfile.porcentaje_avance || 0}% de avance)`
+                  : 'Comenzar mi Reto 5S'}
+            </span>
+            <ArrowRight size={18} />
+          </button>
 
-              {/* Mi intención para estos 30 días */}
-              <div className="form-group">
-                <label className="form-label" htmlFor="input-intencion">
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                    <Heart size={16} color="var(--petrol)" />
-                    Mi intención para estos 30 días:
-                    <span style={{ color: 'var(--danger)' }}>*</span>
-                  </span>
-                  <small>¿Qué propósito personal y de servicio te motiva en este reto? (Obligatorio)</small>
-                </label>
-                <textarea
-                  id="input-intencion"
-                  className="form-textarea"
-                  rows={2}
-                  placeholder="Ej. Conectar genuinamente con mis compañeros, escuchar con empatía a cada cliente y aportar el 1% extra cada día."
-                  value={intencion}
-                  onChange={(e) => setIntencion(e.target.value)}
-                  required
-                />
-              </div>
-
-              {/* Action Button */}
+          {/* Botón Cerrar Sesión / Salir si el usuario ya está autenticado */}
+          {isExistingUser && (
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--gray-200)', textAlign: 'center' }}>
               <button
-                type="submit"
-                className="btn btn-primary btn-lg"
-                style={{ width: '100%', gap: '10px' }}
+                type="button"
+                onClick={handleLogout}
+                className="btn btn-outline btn-sm"
+                style={{
+                  width: '100%',
+                  color: 'var(--danger)',
+                  borderColor: 'var(--gray-300)',
+                  gap: '8px'
+                }}
               >
-                <span>
-                  {isExistingUser
-                    ? 'Guardar y Continuar'
-                    : matchedProfile
-                      ? `Continuar mi Reto (${matchedProfile.porcentaje_avance || 0}% de avance)`
-                      : 'Comenzar mi Reto 5S'}
-                </span>
-                <ArrowRight size={18} />
+                <LogOut size={16} />
+                <span>Cerrar sesión / Salir de este perfil</span>
               </button>
-
-              {/* Botón Cerrar Sesión / Salir si el usuario ya está autenticado */}
-              {isExistingUser && (
-                <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--gray-200)', textAlign: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="btn btn-outline btn-sm"
-                    style={{
-                      width: '100%',
-                      color: 'var(--danger)',
-                      borderColor: 'var(--gray-300)',
-                      gap: '8px'
-                    }}
-                  >
-                    <LogOut size={16} />
-                    <span>Cerrar sesión / Salir de este perfil</span>
-                  </button>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--gray-500)', marginTop: '6px' }}>
-                    Tu progreso se guardará automáticamente antes de salir.
-                  </p>
-                </div>
-              )}
-            </form>
-          </>
-        )}
+              <p style={{ fontSize: '0.78rem', color: 'var(--gray-500)', marginTop: '6px' }}>
+                Tu progreso se guardará automáticamente antes de salir.
+              </p>
+            </div>
+          )}
+        </form>
 
         {/* Enlace para Administradores / Líderes */}
         <div style={{

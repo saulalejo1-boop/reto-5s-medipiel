@@ -207,9 +207,34 @@ export const api = {
   },
 
   /**
+   * Limpia perfiles remotos que se hayan filtrado erróneamente en LocalStorage
+   * desde descargas masivas previas del Portal Admin.
+   * Conserva únicamente el perfil activo del usuario actual si existe.
+   */
+  sanitizeSavedProfiles() {
+    try {
+      const SANITIZE_KEY = "medipiel_reto5s_profiles_cleaned_v2";
+      if (typeof window !== "undefined" && window.localStorage) {
+        if (!localStorage.getItem(SANITIZE_KEY)) {
+          const activeData = this.getLocalData();
+          if (activeData && activeData.nombre && activeData.nombre.trim().length > 0) {
+            localStorage.setItem(STORAGE_KEY_PROFILES, JSON.stringify([activeData]));
+          } else {
+            localStorage.removeItem(STORAGE_KEY_PROFILES);
+          }
+          localStorage.setItem(SANITIZE_KEY, "true");
+        }
+      }
+    } catch (e) {
+      console.warn("No se pudo ejecutar sanitizeSavedProfiles:", e);
+    }
+  },
+
+  /**
    * Obtiene la lista de perfiles guardados en este dispositivo
    */
   getSavedProfiles() {
+    this.sanitizeSavedProfiles();
     try {
       const raw = localStorage.getItem(STORAGE_KEY_PROFILES);
       return raw ? JSON.parse(raw) : [];
@@ -500,8 +525,8 @@ export const api = {
         }
       }
 
-      // Guardamos en el directorio local de perfiles en lote
-      this.saveProfilesBatch(mapped);
+      // NOTA: Los participantes remotos de Google Sheets NO se guardan en el almacenamiento local
+      // para proteger la privacidad de los colaboradores y evitar que aparezcan en equipos compartidos.
 
       return {
         success: true,

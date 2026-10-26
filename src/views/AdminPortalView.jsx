@@ -84,8 +84,7 @@ export function AdminPortalView() {
       const res = await api.fetchParticipantsFromGoogleSheets();
       if (res && res.success && Array.isArray(res.participants)) {
         setCloudParticipants(res.participants);
-        setLastCloudSync(new Date());
-        if (refreshProfiles) refreshProfiles();
+        // Los datos remotos se guardan en cloudParticipants para las métricas del Admin
         if (showNotification) {
           showToast(`¡Sincronizado! Se cargaron ${res.participants.length} colaboradores desde Google Sheets.`, 'success');
         }
@@ -101,7 +100,7 @@ export function AdminPortalView() {
     } finally {
       setIsLoadingCloud(false);
     }
-  }, [refreshProfiles, showToast]);
+  }, [showToast]);
 
   // Carga automática de Google Sheets al entrar autenticado al portal
   useEffect(() => {
