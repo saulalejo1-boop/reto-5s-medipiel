@@ -28,7 +28,13 @@ export default async function handler(req, res) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-      const targetUrl = `${SCRIPT_URL}?action=get_all&_t=${Date.now()}`;
+      const queryParams = new URLSearchParams(req.query || {});
+      if (!queryParams.has("action")) {
+        queryParams.set("action", "get_all");
+      }
+      queryParams.set("_t", Date.now().toString());
+
+      const targetUrl = `${SCRIPT_URL}?${queryParams.toString()}`;
       const response = await fetch(targetUrl, {
         method: "GET",
         headers: {

@@ -158,20 +158,49 @@ export function RetoProvider({ children }) {
     });
   }, [persistChanges, showToast]);
 
+  // Perfiles remotos de Google Sheets en segundo plano para búsqueda instantánea
+  const [remoteProfiles, setRemoteProfiles] = useState(() => api.cachedRemoteParticipants || []);
+  const [isLoadingRemoteProfiles, setIsLoadingRemoteProfiles] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoadingRemoteProfiles(true);
+    api.fetchParticipantsFromGoogleSheets().then(res => {
+      if (isMounted && res && res.success && Array.isArray(res.participants)) {
+        setRemoteProfiles(res.participants);
+      }
+    }).catch(err => {
+      console.warn("Pre-carga remota de participantes:", err);
+    }).finally(() => {
+      if (isMounted) setIsLoadingRemoteProfiles(false);
+    });
+    return () => { isMounted = false; };
+  }, []);
+
   /**
    * Inicializa o restaura un participante desde el Onboarding
    * Si la persona vuelve a ingresar y escribe su nombre, recupera todo su progreso previo
+   * (tanto de este dispositivo como directamente desde Google Sheets)
    */
-  const startParticipant = useCallback((nombre, tienda, intencion) => {
+  const startParticipant = useCallback(async (nombre, tienda, intencion, preloadedProfile = null) => {
     const trimmedNombre = (nombre || '').trim();
     const trimmedTienda = (tienda || '').trim();
     const trimmedIntencion = (intencion || '').trim();
     const normName = normalizeText(trimmedNombre);
 
-    // 1. Buscar si ya existe un perfil guardado con este nombre
-    const matched = api.findProfileByName(trimmedNombre);
+    let matched = preloadedProfile;
 
-    // 2. O si coincide con la sesión local activa
+    // 1. Si no viene pre-cargado, buscar en directorio unificado (local y memoria remota)
+    if (!matched) {
+      matched = api.findProfileAnywhere(trimmedNombre);
+    }
+
+    // 2. Si todavía no se encuentra, consultar en vivo a Google Sheets
+    if (!matched) {
+      matched = await api.fetchParticipantByName(trimmedNombre);
+    }
+
+    // 3. O si coincide con la sesión local activa
     const existing = api.getLocalData();
     const isExistingMatch = existing && existing.nombre && normalizeText(existing.nombre) === normName;
 
@@ -211,6 +240,7 @@ export function RetoProvider({ children }) {
 
     setParticipant(updated);
     api.saveLocalData(updated);
+    api.saveProfileToDirectory(updated);
     setSavedProfiles(api.getSavedProfiles());
     setIsOnboardingOpen(false);
 
@@ -434,6 +464,8 @@ export function RetoProvider({ children }) {
         switchProfile,
         deleteProfile,
         savedProfiles,
+        remoteProfiles,
+        isLoadingRemoteProfiles,
         refreshProfiles,
         syncRemoteProfiles,
         startParticipant,

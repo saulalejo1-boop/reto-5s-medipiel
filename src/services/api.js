@@ -26,6 +26,7 @@ export function normalizeText(str) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -136,6 +137,73 @@ export function createEmptyParticipant(nombre = "", tienda = "", intencion = "")
   };
 }
 
+/**
+ * Algoritmo inteligente que encuentra el mejor perfil coincidente para un nombre.
+ * Resuelve casos donde una persona se registró con o sin segundo nombre o apellido,
+ * o si tiene un registro duplicado con 0% y otro con avance previo (rescata el avance).
+ */
+export function findBestProfileMatch(nombre, profiles) {
+  if (!nombre || !Array.isArray(profiles) || profiles.length === 0) return null;
+  const norm = normalizeText(nombre);
+  if (!norm || norm.length < 2) return null;
+
+  // 1. Coincidencia exacta
+  const exactMatches = profiles.filter(p => p && p.nombre && normalizeText(p.nombre) === norm);
+  if (exactMatches.length > 0) {
+    exactMatches.sort((a, b) => (Number(b.porcentaje_avance) || 0) - (Number(a.porcentaje_avance) || 0));
+    const bestExact = exactMatches[0];
+
+    // Si el registro exacto tiene 0% de avance, pero hay otro del mismo colaborador con avance
+    if ((Number(bestExact.porcentaje_avance) || 0) === 0 && (!bestExact.dias_completados || bestExact.dias_completados.length === 0)) {
+      const words = norm.split(" ").filter(w => w.length > 2);
+      if (words.length >= 2) {
+        const firstWord = words[0];
+        const lastWord = words[words.length - 1];
+        const candidateWithProgress = profiles.find(p => {
+          if (!p || !p.nombre || p === bestExact) return false;
+          const pNorm = normalizeText(p.nombre);
+          const pWords = pNorm.split(" ").filter(w => w.length > 2);
+          const matchesFirstAndLast = pWords.includes(firstWord) && pWords.includes(lastWord);
+          const hasAdv = (Number(p.porcentaje_avance) || 0) > 0 || (Array.isArray(p.dias_completados) && p.dias_completados.length > 0);
+          return matchesFirstAndLast && hasAdv;
+        });
+
+        if (candidateWithProgress) {
+          return {
+            ...candidateWithProgress,
+            nombre: bestExact.nombre || candidateWithProgress.nombre,
+            tienda: bestExact.tienda || candidateWithProgress.tienda,
+            intencion_30_dias: bestExact.intencion_30_dias || candidateWithProgress.intencion_30_dias,
+            _mergedFrom: candidateWithProgress.nombre
+          };
+        }
+      }
+    }
+    return bestExact;
+  }
+
+  // 2. Coincidencia por primer nombre y apellido
+  const words = norm.split(" ").filter(w => w.length > 2);
+  if (words.length >= 2) {
+    const firstWord = words[0];
+    const lastWord = words[words.length - 1];
+
+    const candidates = profiles.filter(p => {
+      if (!p || !p.nombre) return false;
+      const pNorm = normalizeText(p.nombre);
+      const pWords = pNorm.split(" ").filter(w => w.length > 2);
+      return pWords.includes(firstWord) && pWords.includes(lastWord);
+    });
+
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => (Number(b.porcentaje_avance) || 0) - (Number(a.porcentaje_avance) || 0));
+      return candidates[0];
+    }
+  }
+
+  return null;
+}
+
 export const api = {
   /**
    * Obtiene la URL configurada para Google Apps Script
@@ -196,9 +264,11 @@ export const api = {
    */
   getLocalData() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY_DATA);
-      if (raw) {
-        return JSON.parse(raw);
+      if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem(STORAGE_KEY_DATA);
+        if (raw) {
+          return JSON.parse(raw);
+        }
       }
     } catch (e) {
       console.error("Error al leer datos locales", e);
@@ -241,6 +311,141 @@ export const api = {
     } catch (e) {
       return [];
     }
+  },
+
+  cachedRemoteParticipants: null,
+  cachedRemoteTimestamp: 0,
+  remoteFetchPromise: null,
+
+
+  /**
+   * Busca si existe un perfil en cualquier almacenamiento (local o remoto descargado)
+   */
+  findProfileAnywhere(nombre) {
+    if (!nombre) return null;
+    const pool = [];
+
+    // 1. Sesión local activa
+    const local = this.getLocalData();
+    if (local && local.nombre) pool.push(local);
+
+    // 2. Perfiles locales en dispositivo
+    const localSaved = this.getSavedProfiles();
+    if (Array.isArray(localSaved)) pool.push(...localSaved);
+
+    // 3. Perfiles de Google Sheets en memoria
+    if (Array.isArray(this.cachedRemoteParticipants)) {
+      pool.push(...this.cachedRemoteParticipants);
+    }
+
+    return findBestProfileMatch(nombre, pool);
+  },
+
+  /**
+   * Búsqueda reactiva inteligente en el directorio unificado (local + nube)
+   * Permite sugerir coincidencias al usuario mientras escribe su nombre
+   */
+  searchDirectory(query, maxResults = 6) {
+    if (!query) return [];
+    const normQuery = normalizeText(query);
+    if (normQuery.length < 2) return [];
+
+    const map = new Map();
+
+    // 1. Agregar perfiles guardados localmente
+    const localProfiles = this.getSavedProfiles();
+    localProfiles.forEach(p => {
+      if (p && p.nombre) {
+        const key = normalizeText(p.nombre);
+        if (key) map.set(key, p);
+      }
+    });
+
+    // 2. Agregar sesión activa
+    const active = this.getLocalData();
+    if (active && active.nombre) {
+      const key = normalizeText(active.nombre);
+      if (key) map.set(key, active);
+    }
+
+    // 3. Agregar perfiles remotos de Google Sheets
+    if (Array.isArray(this.cachedRemoteParticipants)) {
+      this.cachedRemoteParticipants.forEach(p => {
+        if (p && p.nombre) {
+          const key = normalizeText(p.nombre);
+          if (key) {
+            const existing = map.get(key);
+            if (!existing) {
+              map.set(key, p);
+            } else {
+              // Conservar el que tenga mayor información o avance
+              const pAdv = Number(p.porcentaje_avance || 0);
+              const eAdv = Number(existing.porcentaje_avance || 0);
+              if (pAdv >= eAdv) {
+                map.set(key, { ...existing, ...p });
+              }
+            }
+          }
+        }
+      });
+    }
+
+    const all = Array.from(map.values());
+    const queryWords = normQuery.split(" ").filter(Boolean);
+
+    const matches = all.filter(p => {
+      const pNorm = normalizeText(p.nombre);
+      if (pNorm === normQuery) return true;
+      if (pNorm.startsWith(normQuery)) return true;
+      if (pNorm.includes(normQuery)) return true;
+      return queryWords.every(w => pNorm.includes(w));
+    });
+
+    // Ordenar: primero coincidencia exacta, luego por mayor avance
+    matches.sort((a, b) => {
+      const aNorm = normalizeText(a.nombre);
+      const bNorm = normalizeText(b.nombre);
+      if (aNorm === normQuery && bNorm !== normQuery) return -1;
+      if (bNorm === normQuery && aNorm !== normQuery) return 1;
+      const advA = Number(a.porcentaje_avance || 0);
+      const advB = Number(b.porcentaje_avance || 0);
+      if (advB !== advA) return advB - advA;
+      return a.nombre.localeCompare(b.nombre);
+    });
+
+    return matches.slice(0, maxResults);
+  },
+
+  /**
+   * Busca un participante por nombre en Google Sheets en tiempo real
+   */
+  async fetchParticipantByName(nombre) {
+    if (!nombre) return null;
+    const norm = normalizeText(nombre);
+    if (!norm) return null;
+
+    // 1. Revisar si ya lo tenemos en memoria
+    const inMemory = this.findProfileAnywhere(nombre);
+    if (inMemory) return inMemory;
+
+    // 2. Si no, forzar recarga desde Google Sheets
+    const res = await this.fetchParticipantsFromGoogleSheets(true);
+    if (res && res.success && Array.isArray(res.participants)) {
+      const exact = res.participants.find(p => p.nombre && normalizeText(p.nombre) === norm);
+      if (exact) return exact;
+
+      // Coincidencia por palabras del nombre
+      const words = norm.split(" ").filter(w => w.length > 2);
+      if (words.length >= 2) {
+        const fuzzy = res.participants.find(p => {
+          const pNorm = normalizeText(p.nombre);
+          return words.every(w => pNorm.includes(w));
+        });
+        if (fuzzy) return fuzzy;
+      }
+    }
+
+    return null;
   },
 
   /**
@@ -450,117 +655,155 @@ export const api = {
    * Consulta y descarga todos los participantes y sus respuestas guardadas en Google Sheets.
    * Utiliza primero la ruta serverless propia (/api/participants) para evitar bloqueos CORS y 
    * problemas de redirección en Safari iOS y redes corporativas, con fallback directo a Google Apps Script.
+   * Cuenta con caché en memoria (90s) y coalescencia de promesas concurrentes.
    */
-  async fetchParticipantsFromGoogleSheets() {
-    const directUrl = this.getScriptUrl();
-    const proxyUrl = "/api/participants";
-
-    let rawData = null;
-    let lastError = null;
-
-    // Estrategia 1: Intentar mediante la Serverless Function de Vercel (/api/participants)
-    // Es same-origin: no tiene problemas de ITP, ni CORS, ni cuelgues de redirección 302 en iOS Safari
-    if (typeof window !== "undefined") {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 18000);
-
-        const response = await fetch(`${proxyUrl}?_t=${Date.now()}`, {
-          method: "GET",
-          headers: { "Accept": "application/json" },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const json = await response.json();
-          if (json && json.status === "ok" && Array.isArray(json.participants)) {
-            rawData = json;
-          }
-        }
-      } catch (err) {
-        console.warn("Intento por proxy serverless falló, intentando enlace directo:", err.message);
-        lastError = err;
-      }
-    }
-
-    // Estrategia 2: Fallback directo al Web App de Google Apps Script
-    if (!rawData && directUrl) {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 22000);
-
-        const fetchUrl = `${directUrl}${directUrl.includes('?') ? '&' : '?'}action=get_all&_t=${Date.now()}`;
-        const response = await fetch(fetchUrl, {
-          method: "GET",
-          headers: { "Accept": "application/json" },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-          const json = await response.json();
-          if (json && json.status === "ok" && Array.isArray(json.participants)) {
-            rawData = json;
-          }
-        } else {
-          throw new Error(`Google Sheets HTTP ${response.status}`);
-        }
-      } catch (err) {
-        console.warn("Intento directo a Google Apps Script falló:", err.message);
-        lastError = err;
-      }
-    }
-
-    if (rawData && Array.isArray(rawData.participants)) {
-      const mapped = [];
-      for (const row of rawData.participants) {
-        try {
-          const p = mapSheetRowToParticipant(row);
-          if (p && p.nombre && p.nombre.length > 0) {
-            mapped.push(p);
-          }
-        } catch (rowErr) {
-          console.warn("Fila ignorada por formato incompatible:", rowErr, row);
-        }
-      }
-
-      // NOTA: Los participantes remotos de Google Sheets NO se guardan en el almacenamiento local
-      // para proteger la privacidad de los colaboradores y evitar que aparezcan en equipos compartidos.
-
+  async fetchParticipantsFromGoogleSheets(forceRefresh = false) {
+    if (!forceRefresh && Array.isArray(this.cachedRemoteParticipants) && (Date.now() - this.cachedRemoteTimestamp < 90000)) {
       return {
         success: true,
-        count: mapped.length,
-        participants: mapped
+        count: this.cachedRemoteParticipants.length,
+        participants: this.cachedRemoteParticipants
       };
     }
 
-    const errorMsg = lastError
-      ? (lastError.name === "AbortError" 
-          ? "La conexión tardó demasiado tiempo en responder. Por favor presiona 'Recargar Datos Ahora'." 
-          : (lastError.message || "Error al conectar con Google Sheets"))
-      : "No se pudo obtener información de colaboradores desde Google Sheets";
+    if (this.remoteFetchPromise && !forceRefresh) {
+      return this.remoteFetchPromise;
+    }
 
-    return {
-      success: false,
-      error: errorMsg,
-      participants: []
-    };
+    this.remoteFetchPromise = (async () => {
+      const directUrl = this.getScriptUrl();
+      const proxyUrl = "/api/participants";
+
+      let rawData = null;
+      let lastError = null;
+
+      // Estrategia 1: Intentar mediante la Serverless Function de Vercel (/api/participants)
+      if (typeof window !== "undefined") {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 18000);
+
+          const response = await fetch(`${proxyUrl}?_t=${Date.now()}`, {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const json = await response.json();
+            if (json && json.status === "ok" && Array.isArray(json.participants)) {
+              rawData = json;
+            }
+          }
+        } catch (err) {
+          console.warn("Intento por proxy serverless falló, intentando enlace directo:", err.message);
+          lastError = err;
+        }
+      }
+
+      // Estrategia 2: Fallback directo al Web App de Google Apps Script
+      if (!rawData && directUrl) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 22000);
+
+          const fetchUrl = `${directUrl}${directUrl.includes('?') ? '&' : '?'}action=get_all&_t=${Date.now()}`;
+          const response = await fetch(fetchUrl, {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          if (response.ok) {
+            const json = await response.json();
+            if (json && json.status === "ok" && Array.isArray(json.participants)) {
+              rawData = json;
+            }
+          } else {
+            throw new Error(`Google Sheets HTTP ${response.status}`);
+          }
+        } catch (err) {
+          console.warn("Intento directo a Google Apps Script falló:", err.message);
+          lastError = err;
+        }
+      }
+
+      if (rawData && Array.isArray(rawData.participants)) {
+        const mapped = [];
+        for (const row of rawData.participants) {
+          try {
+            const p = mapSheetRowToParticipant(row);
+            if (p && p.nombre && p.nombre.length > 0) {
+              mapped.push(p);
+            }
+          } catch (rowErr) {
+            console.warn("Fila ignorada por formato incompatible:", rowErr, row);
+          }
+        }
+
+        this.cachedRemoteParticipants = mapped;
+        this.cachedRemoteTimestamp = Date.now();
+
+        return {
+          success: true,
+          count: mapped.length,
+          participants: mapped
+        };
+      }
+
+      const errorMsg = lastError
+        ? (lastError.name === "AbortError" 
+            ? "La conexión tardó demasiado tiempo en responder. Por favor presiona 'Recargar Datos Ahora'." 
+            : (lastError.message || "Error al conectar con Google Sheets"))
+        : "No se pudo obtener información de colaboradores desde Google Sheets";
+
+      return {
+        success: false,
+        error: errorMsg,
+        participants: []
+      };
+    })().finally(() => {
+      this.remoteFetchPromise = null;
+    });
+
+    return this.remoteFetchPromise;
   }
 };
 
 /**
+ * Obtiene el primer valor no vacío de una fila de Google Sheets evaluando múltiples variantes de encabezado
+ */
+function getSheetField(row, ...possibleKeys) {
+  if (!row) return "";
+  for (const k of possibleKeys) {
+    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
+      return safeStr(row[k]);
+    }
+  }
+  return "";
+}
+
+/**
  * Convierte una fila obtenida desde Google Sheets (con encabezados en español)
  * al objeto de datos de participante estándar de la aplicación.
- * Es totalmente defensivo ante celdas numéricas, booleanas o vacías.
+ * Es totalmente defensivo ante celdas numéricas, booleanas, vacías o variantes de columnas.
  */
 export function mapSheetRowToParticipant(row) {
   if (!row) return null;
 
   // Días completados
   let dias = [];
-  if (row["Días Completados (Lista)"] != null) {
-    const rawList = String(row["Días Completados (Lista)"]);
+  const rawList = getSheetField(
+    row,
+    "Días Completados (Lista)",
+    "Dias Completados (Lista)",
+    "Días Completados",
+    "Dias Completados",
+    "Dias_Completados"
+  );
+  if (rawList) {
     dias = rawList
       .split(/[,;\s]+/)
       .map(n => parseInt(n.trim(), 10))
@@ -569,8 +812,9 @@ export function mapSheetRowToParticipant(row) {
 
   // Tipos de ayuda en SERVIR
   let servirAyuda = [];
-  if (row["SERVIR - Tipos de Ayuda"] != null) {
-    servirAyuda = String(row["SERVIR - Tipos de Ayuda"])
+  const rawServir = getSheetField(row, "SERVIR - Tipos de Ayuda", "SERVIR: Tipos de Ayuda", "SERVIR - Tipos Ayuda");
+  if (rawServir) {
+    servirAyuda = rawServir
       .split(/[,;]+/)
       .map(s => s.trim())
       .filter(Boolean);
@@ -578,8 +822,9 @@ export function mapSheetRowToParticipant(row) {
 
   // Reto integrado S
   let retoS = [];
-  if (row["RETO INTEGRADO - S Combinadas"] != null) {
-    retoS = String(row["RETO INTEGRADO - S Combinadas"])
+  const rawRetoS = getSheetField(row, "RETO INTEGRADO - S Combinadas", "RETO INTEGRADO: S Combinadas");
+  if (rawRetoS) {
+    retoS = rawRetoS
       .split(/[,;]+/)
       .map(s => s.trim())
       .filter(Boolean);
@@ -587,107 +832,128 @@ export function mapSheetRowToParticipant(row) {
 
   // Reconocimiento S
   let recoS = [];
-  if (row["RECONOCIMIENTO - S Destacada"] != null) {
-    recoS = String(row["RECONOCIMIENTO - S Destacada"])
+  const rawRecoS = getSheetField(row, "RECONOCIMIENTO - S Destacada", "RECONOCIMIENTO: S Destacada");
+  if (rawRecoS) {
+    recoS = rawRecoS
       .split(/[,;]+/)
       .map(s => s.trim())
       .filter(Boolean);
   }
 
-  const avanceNum = parseInt(row["Progreso (%)"], 10);
+  const rawAvance = getSheetField(
+    row,
+    "Progreso (%)",
+    "Avance (%)",
+    "Progreso",
+    "Avance",
+    "Porcentaje de Avance"
+  );
+  const avanceNum = parseInt(rawAvance, 10);
   const porcentaje = !isNaN(avanceNum)
     ? avanceNum
     : (dias.length ? Math.min(100, Math.round((dias.length / 30) * 100)) : 0);
 
+  const rawDiaActual = getSheetField(row, "Día Actual", "Dia Actual", "Dia_Actual");
+  const parsedDiaActual = parseInt(rawDiaActual, 10);
+
+  const checkBool = (...keys) => {
+    for (const k of keys) {
+      if (row[k] === true) return true;
+      const str = String(row[k] || "").trim().toUpperCase();
+      if (str === "SÍ" || str === "SI" || str === "TRUE" || str === "1") return true;
+    }
+    return false;
+  };
+
   return {
-    participant_id: safeStr(row["ID Participante"]) || `mdp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    nombre: safeStr(row["Nombre Completo"]),
-    tienda: safeStr(row["Tienda / Sede"]),
-    fecha_inicio: safeStr(row["Fecha Inicio"]),
-    fecha_ultima_actualizacion: safeStr(row["Última Actualización"]) || new Date().toISOString(),
-    dia_actual: parseInt(row["Día Actual"], 10) || (dias.length ? Math.min(30, Math.max(...dias, 1)) : 1),
+    participant_id: getSheetField(row, "ID Participante", "ID", "participant_id") || `mdp_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    nombre: getSheetField(row, "Nombre Completo", "Nombre", "Colaborador"),
+    tienda: getSheetField(row, "Tienda / Sede", "Tienda o Sede", "Tienda", "Sede", "Punto de Venta"),
+    fecha_inicio: getSheetField(row, "Fecha Inicio", "Fecha_Inicio") || new Date().toISOString(),
+    fecha_ultima_actualizacion: getSheetField(row, "Última Actualización", "Ultima Actualizacion", "Fecha_Actualizacion") || new Date().toISOString(),
+    dia_actual: parsedDiaActual || (dias.length ? Math.min(30, Math.max(...dias, 1)) : 1),
     porcentaje_avance: porcentaje,
     dias_completados: dias,
-    intencion_30_dias: safeStr(row["Intención 30 Días"]),
+    intencion_30_dias: getSheetField(row, "Intención 30 Días", "Intencion 30 Dias", "Intención", "Intencion", "Intención para estos 30 días"),
     meta_etapa1: "",
 
     // SER
-    ser_caracteristica_1: safeStr(row["SER - Característica 1"]),
-    ser_caracteristica_2: safeStr(row["SER - Característica 2"]),
-    ser_caracteristica_3: safeStr(row["SER - Característica 3"]),
-    ser_accion: safeStr(row["SER - Acción Concreta"]),
-    ser_descubrimiento: safeStr(row["SER - Qué descubrí de mí"]),
+    ser_caracteristica_1: getSheetField(row, "SER - Característica 1", "SER: Característica 1", "SER - Caracteristica 1", "SER: Caracteristica 1"),
+    ser_caracteristica_2: getSheetField(row, "SER - Característica 2", "SER: Característica 2", "SER - Caracteristica 2", "SER: Caracteristica 2"),
+    ser_caracteristica_3: getSheetField(row, "SER - Característica 3", "SER: Característica 3", "SER - Caracteristica 3", "SER: Caracteristica 3"),
+    ser_accion: getSheetField(row, "SER - Acción Concreta", "SER: Acción Concreta", "SER - Accion Concreta"),
+    ser_descubrimiento: getSheetField(row, "SER - Qué descubrí de mí", "SER: Qué descubrí de mí", "SER - Que descubri de mi"),
 
     // SERVIR
     servir_tipos_ayuda: servirAyuda,
-    servir_a_quien: safeStr(row["SERVIR - A quién apoyé"]),
-    servir_necesidad: safeStr(row["SERVIR - Necesidad observada"]),
-    servir_que_hice: safeStr(row["SERVIR - Qué hice"]),
-    servir_cambio: safeStr(row["SERVIR - Qué cambió"]),
+    servir_a_quien: getSheetField(row, "SERVIR - A quién apoyé", "SERVIR: A quién apoyé", "SERVIR - A quien apoye"),
+    servir_necesidad: getSheetField(row, "SERVIR - Necesidad observada", "SERVIR: Necesidad observada"),
+    servir_que_hice: getSheetField(row, "SERVIR - Qué hice", "SERVIR: Qué hice", "SERVIR - Que hice"),
+    servir_cambio: getSheetField(row, "SERVIR - Qué cambió", "SERVIR: Qué cambió", "SERVIR - Que cambio"),
 
     // SABER
-    saber_que_ensene: safeStr(row["SABER - Qué enseñé y a quién"]),
-    saber_a_quien: safeStr(row["SABER - A quién apoyé"]),
-    saber_que_aprendi: safeStr(row["SABER - Qué aprendí de otro"]),
-    saber_donde_aplicar: safeStr(row["SABER - Dónde lo aplicaré"]),
+    saber_que_ensene: getSheetField(row, "SABER - Qué enseñé y a quién", "SABER: Qué enseñé y a quién", "SABER - Que ensene"),
+    saber_a_quien: getSheetField(row, "SABER - A quién apoyé", "SABER: A quién apoyé", "SABER - A quien apoye"),
+    saber_que_aprendi: getSheetField(row, "SABER - Qué aprendí de otro", "SABER: Qué aprendí de otro", "SABER - Que aprendi"),
+    saber_donde_aplicar: getSheetField(row, "SABER - Dónde lo aplicaré", "SABER: Dónde lo aplicaré", "SABER - Donde lo aplicare"),
 
     // DÍA 15
-    dia15_historia: safeStr(row["D15 - Historia 1 minuto"]),
-    dia15_rojo: safeStr(row["D15 - Semáforo Rojo (Dejar de hacer)"]),
-    dia15_amarillo: safeStr(row["D15 - Semáforo Amarillo (Mejorar)"]),
-    dia15_verde: safeStr(row["D15 - Semáforo Verde (Mantener)"]),
-    dia15_ser: parseInt(row["D15 - Termómetro SER (1-5)"], 10) || 4,
-    dia15_servir: parseInt(row["D15 - Termómetro SERVIR (1-5)"], 10) || 4,
-    dia15_saber: parseInt(row["D15 - Termómetro SABER (1-5)"], 10) || 4,
-    dia15_sonreir: parseInt(row["D15 - Termómetro SONREÍR (1-5)"], 10) || 4,
-    dia15_sorprender: parseInt(row["D15 - Termómetro SORPRENDER (1-5)"], 10) || 4,
-    dia15_s_fortalecer: safeStr(row["D15 - S a Fortalecer"]),
-    dia15_comportamiento: safeStr(row["D15 - Comportamiento de salida"]),
+    dia15_historia: getSheetField(row, "D15 - Historia 1 minuto", "D15: Historia 1 minuto"),
+    dia15_rojo: getSheetField(row, "D15 - Semáforo Rojo (Dejar de hacer)", "D15: Semáforo Rojo"),
+    dia15_amarillo: getSheetField(row, "D15 - Semáforo Amarillo (Mejorar)", "D15: Semáforo Amarillo"),
+    dia15_verde: getSheetField(row, "D15 - Semáforo Verde (Mantener)", "D15: Semáforo Verde"),
+    dia15_ser: parseInt(getSheetField(row, "D15 - Termómetro SER (1-5)", "D15: Termómetro SER"), 10) || 4,
+    dia15_servir: parseInt(getSheetField(row, "D15 - Termómetro SERVIR (1-5)", "D15: Termómetro SERVIR"), 10) || 4,
+    dia15_saber: parseInt(getSheetField(row, "D15 - Termómetro SABER (1-5)", "D15: Termómetro SABER"), 10) || 4,
+    dia15_sonreir: parseInt(getSheetField(row, "D15 - Termómetro SONREÍR (1-5)", "D15: Termómetro SONREIR"), 10) || 4,
+    dia15_sorprender: parseInt(getSheetField(row, "D15 - Termómetro SORPRENDER (1-5)", "D15: Termómetro SORPRENDER"), 10) || 4,
+    dia15_s_fortalecer: getSheetField(row, "D15 - S a Fortalecer", "D15: S a Fortalecer"),
+    dia15_comportamiento: getSheetField(row, "D15 - Comportamiento de salida", "D15: Comportamiento de salida"),
     meta_etapa2: "",
 
     // SONREÍR
-    sonreir_reconocimiento: String(row["SONREÍR - Reconocí algo positivo"] || "").trim().toUpperCase() === "SÍ" || row["SONREÍR - Reconocí algo positivo"] === true,
-    sonreir_queja: String(row["SONREÍR - Transformé queja en propuesta"] || "").trim().toUpperCase() === "SÍ" || row["SONREÍR - Transformé queja en propuesta"] === true,
-    sonreir_ambiente: String(row["SONREÍR - Mejoré el ambiente"] || "").trim().toUpperCase() === "SÍ" || row["SONREÍR - Mejoré el ambiente"] === true,
-    sonreir_situacion: safeStr(row["SONREÍR - Situación transformada"]),
-    sonreir_reaccion: safeStr(row["SONREÍR - Reacción antes vs ahora"]),
-    sonreir_efecto: safeStr(row["SONREÍR - Efecto logrado"]),
+    sonreir_reconocimiento: checkBool("SONREÍR - Reconocí algo positivo", "SONREIR - Reconoci algo positivo"),
+    sonreir_queja: checkBool("SONREÍR - Transformé queja en propuesta", "SONREIR - Transforme queja en propuesta"),
+    sonreir_ambiente: checkBool("SONREÍR - Mejoré el ambiente", "SONREIR - Mejore el ambiente"),
+    sonreir_situacion: getSheetField(row, "SONREÍR - Situación transformada", "SONREIR - Situacion transformada"),
+    sonreir_reaccion: getSheetField(row, "SONREÍR - Reacción antes vs ahora", "SONREIR - Reaccion antes vs ahora"),
+    sonreir_efecto: getSheetField(row, "SONREÍR - Efecto logrado", "SONREIR - Efecto logrado"),
 
     // SORPRENDER
-    sorprender_oportunidad: safeStr(row["SORPRENDER - Oportunidad cotidiana"]),
-    sorprender_idea: safeStr(row["SORPRENDER - Idea 1% extra"]),
-    sorprender_prueba: safeStr(row["SORPRENDER - Prueba y qué pasó"]),
-    sorprender_resultado: safeStr(row["SORPRENDER - Resultado (Funcionó)"]),
-    sorprender_y_si: safeStr(row["SORPRENDER - Banco de ideas (¿Y si nosotros...?)"]),
+    sorprender_oportunidad: getSheetField(row, "SORPRENDER - Oportunidad cotidiana", "SORPRENDER: Oportunidad cotidiana"),
+    sorprender_idea: getSheetField(row, "SORPRENDER - Idea 1% extra", "SORPRENDER: Idea 1% extra"),
+    sorprender_prueba: getSheetField(row, "SORPRENDER - Prueba y qué pasó", "SORPRENDER: Prueba y que paso"),
+    sorprender_resultado: getSheetField(row, "SORPRENDER - Resultado (Funcionó)", "SORPRENDER: Resultado"),
+    sorprender_y_si: getSheetField(row, "SORPRENDER - Banco de ideas (¿Y si nosotros...?)", "SORPRENDER: Banco de ideas"),
 
     // RETO INTEGRADO
     reto_integrado_s: retoS,
-    reto_integrado_accion: safeStr(row["RETO INTEGRADO - Acción"]),
-    reto_integrado_beneficiario: safeStr(row["RETO INTEGRADO - Beneficiario"]),
-    reto_integrado_resultado: safeStr(row["RETO INTEGRADO - Resultado"]),
-    reto_integrado_aprendizaje: safeStr(row["RETO INTEGRADO - Enseñanza"]),
+    reto_integrado_accion: getSheetField(row, "RETO INTEGRADO - Acción", "RETO INTEGRADO: Acción", "RETO INTEGRADO - Accion"),
+    reto_integrado_beneficiario: getSheetField(row, "RETO INTEGRADO - Beneficiario", "RETO INTEGRADO: Beneficiario"),
+    reto_integrado_resultado: getSheetField(row, "RETO INTEGRADO - Resultado", "RETO INTEGRADO: Resultado"),
+    reto_integrado_aprendizaje: getSheetField(row, "RETO INTEGRADO - Enseñanza", "RETO INTEGRADO: Enseñanza", "RETO INTEGRADO - Aprendizaje"),
 
     // PASAPORTE
-    pasaporte_momento_favorito: safeStr(row["PASAPORTE - Momento Favorito y S"]),
+    pasaporte_momento_favorito: getSheetField(row, "PASAPORTE - Momento Favorito y S", "PASAPORTE: Momento Favorito"),
 
     // CIERRE
-    cierre_situacion: safeStr(row["CIERRE - Situación"]),
-    cierre_accion: safeStr(row["CIERRE - Acción"]),
-    cierre_resultado: safeStr(row["CIERRE - Resultado"]),
-    cierre_aprendizaje: safeStr(row["CIERRE - Aprendizaje"]),
+    cierre_situacion: getSheetField(row, "CIERRE - Situación", "CIERRE: Situación", "CIERRE - Situacion"),
+    cierre_accion: getSheetField(row, "CIERRE - Acción", "CIERRE: Acción", "CIERRE - Accion"),
+    cierre_resultado: getSheetField(row, "CIERRE - Resultado", "CIERRE: Resultado"),
+    cierre_aprendizaje: getSheetField(row, "CIERRE - Aprendizaje", "CIERRE: Aprendizaje"),
 
     // RECONOCIMIENTO
-    reconocimiento_persona: safeStr(row["RECONOCIMIENTO - Persona"]),
+    reconocimiento_persona: getSheetField(row, "RECONOCIMIENTO - Persona", "RECONOCIMIENTO: Persona"),
     reconocimiento_s: recoS,
-    reconocimiento_motivo: safeStr(row["RECONOCIMIENTO - Motivo"]),
+    reconocimiento_motivo: getSheetField(row, "RECONOCIMIENTO - Motivo", "RECONOCIMIENTO: Motivo"),
 
     // COMPROMISOS
-    compromiso_ser: safeStr(row["COMPROMISO - SER"]),
-    compromiso_servir: safeStr(row["COMPROMISO - SERVIR"]),
-    compromiso_saber: safeStr(row["COMPROMISO - SABER"]),
-    compromiso_sonreir: safeStr(row["COMPROMISO - SONREÍR"]),
-    compromiso_sorprender: safeStr(row["COMPROMISO - SORPRENDER"]),
-    compromiso_30_dias: safeStr(row["COMPROMISO - 30 Días Siguientes"]),
-    fecha_finalizacion: safeStr(row["Fecha Finalización"])
+    compromiso_ser: getSheetField(row, "COMPROMISO - SER", "COMPROMISO: SER"),
+    compromiso_servir: getSheetField(row, "COMPROMISO - SERVIR", "COMPROMISO: SERVIR"),
+    compromiso_saber: getSheetField(row, "COMPROMISO - SABER", "COMPROMISO: SABER"),
+    compromiso_sonreir: getSheetField(row, "COMPROMISO - SONREÍR", "COMPROMISO: SONREIR"),
+    compromiso_sorprender: getSheetField(row, "COMPROMISO - SORPRENDER", "COMPROMISO: SORPRENDER"),
+    compromiso_30_dias: getSheetField(row, "COMPROMISO - 30 Días Siguientes", "COMPROMISO: 30 Días Siguientes"),
+    fecha_finalizacion: getSheetField(row, "Fecha Finalización", "Fecha Finalizacion")
   };
 }

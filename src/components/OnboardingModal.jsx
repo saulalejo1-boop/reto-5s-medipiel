@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useReto } from '../context/RetoContext';
-import { normalizeText } from '../services/api';
+import { normalizeText, api, findBestProfileMatch } from '../services/api';
 import {
   Sparkles,
   MapPin,
@@ -10,7 +10,11 @@ import {
   X,
   LogOut,
   CheckCircle2,
-  ShieldCheck
+  ShieldCheck,
+  Search,
+  RefreshCw,
+  Award,
+  Calendar
 } from 'lucide-react';
 
 export function OnboardingModal() {
@@ -21,7 +25,9 @@ export function OnboardingModal() {
     setIsOnboardingOpen,
     setActiveTab,
     logout,
-    savedProfiles = []
+    savedProfiles = [],
+    remoteProfiles = [],
+    isLoadingRemoteProfiles = false
   } = useReto();
 
   const isExistingUser = Boolean(participant.nombre && participant.nombre.trim().length > 0);
@@ -30,6 +36,8 @@ export function OnboardingModal() {
   const [tienda, setTienda] = useState(participant.tienda || '');
   const [intencion, setIntencion] = useState(participant.intencion_30_dias || '');
   const [error, setError] = useState('');
+  const [matchedProfile, setMatchedProfile] = useState(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Sincronizar campos cuando cambia el participante activo o se abre el modal
   useEffect(() => {
@@ -37,34 +45,144 @@ export function OnboardingModal() {
       setNombre(participant.nombre);
       setTienda(participant.tienda || '');
       setIntencion(participant.intencion_30_dias || '');
+      setMatchedProfile(participant);
     } else {
       setNombre('');
       setTienda('');
       setIntencion('');
+      setMatchedProfile(null);
     }
   }, [participant, isOnboardingOpen]);
 
-  // Detección automática en tiempo real del perfil según el nombre escrito
-  const normalizedInputName = normalizeText(nombre);
-  const matchedProfile = !isExistingUser && normalizedInputName.length >= 2
-    ? savedProfiles.find(p => p.nombre && normalizeText(p.nombre) === normalizedInputName)
-    : null;
+  // Directorio unificado de búsqueda: perfiles en este equipo + todos los perfiles de Google Sheets
+  const allProfiles = useMemo(() => {
+    const map = new Map();
 
-  // Si encontramos un perfil guardado con ese nombre y el usuario aún no ha escrito tienda/intención, las pre-llenamos
-  useEffect(() => {
-    if (matchedProfile && !isExistingUser) {
-      if (!tienda.trim() && matchedProfile.tienda) {
-        setTienda(matchedProfile.tienda);
-      }
-      if (!intencion.trim() && matchedProfile.intencion_30_dias) {
-        setIntencion(matchedProfile.intencion_30_dias);
-      }
+    // 1. Perfiles locales en el navegador
+    if (Array.isArray(savedProfiles)) {
+      savedProfiles.forEach(p => {
+        if (p && p.nombre) {
+          const key = normalizeText(p.nombre);
+          if (key) map.set(key, p);
+        }
+      });
     }
-  }, [matchedProfile, isExistingUser]);
+
+    // 2. Perfiles descargados en vivo desde Google Sheets
+    if (Array.isArray(remoteProfiles)) {
+      remoteProfiles.forEach(p => {
+        if (p && p.nombre) {
+          const key = normalizeText(p.nombre);
+          if (key) {
+            const existing = map.get(key);
+            if (!existing) {
+              map.set(key, p);
+            } else {
+              // Conservar el que tenga respuestas o mayor porcentaje de avance
+              const pAdv = Number(p.porcentaje_avance || 0);
+              const eAdv = Number(existing.porcentaje_avance || 0);
+              if (pAdv >= eAdv) {
+                map.set(key, { ...existing, ...p });
+              }
+            }
+          }
+        }
+      });
+    }
+
+    return Array.from(map.values());
+  }, [savedProfiles, remoteProfiles]);
+
+  const normalizedInputName = normalizeText(nombre);
+
+  // Reconocimiento y autocompletado en tiempo real al escribir o pegar el nombre
+  useEffect(() => {
+    if (isExistingUser) return;
+
+    if (!normalizedInputName || normalizedInputName.length < 2) {
+      setMatchedProfile(null);
+      return;
+    }
+
+    // Buscar coincidencia inteligente (detecta exacto y rescata avance si hubo variaciones)
+    const best = findBestProfileMatch(nombre, allProfiles);
+
+    if (best) {
+      setMatchedProfile(best);
+      // Pre-llenar tienda e intención automáticamente si no han sido escritas o si están vacías
+      if (best.tienda) {
+        setTienda(best.tienda);
+      }
+      if (best.intencion_30_dias) {
+        setIntencion(best.intencion_30_dias);
+      }
+    } else if (matchedProfile && normalizeText(matchedProfile.nombre) !== normalizedInputName) {
+      // Si el usuario modificó el nombre y ya no coincide, desvincular el match exacto
+      setMatchedProfile(null);
+    }
+  }, [normalizedInputName, allProfiles, isExistingUser]);
+
+  // Sugerencias de colaboradores mientras escribe si hay coincidencias parciales
+  const suggestions = useMemo(() => {
+    if (isExistingUser || !normalizedInputName || normalizedInputName.length < 2) return [];
+    if (matchedProfile && normalizeText(matchedProfile.nombre) === normalizedInputName) return [];
+
+    const queryWords = normalizedInputName.split(" ").filter(Boolean);
+
+    const matches = allProfiles.filter(p => {
+      const pNorm = normalizeText(p.nombre);
+      if (pNorm === normalizedInputName) return false;
+      if (pNorm.includes(normalizedInputName)) return true;
+      return queryWords.every(w => pNorm.includes(w));
+    });
+
+    matches.sort((a, b) => {
+      const advA = Number(a.porcentaje_avance || 0);
+      const advB = Number(b.porcentaje_avance || 0);
+      if (advB !== advA) return advB - advA;
+      return a.nombre.localeCompare(b.nombre);
+    });
+
+    return matches.slice(0, 3);
+  }, [normalizedInputName, allProfiles, matchedProfile, isExistingUser]);
+
+  // Seleccionar una sugerencia
+  const handleSelectSuggestion = (prof) => {
+    setMatchedProfile(prof);
+    setNombre(prof.nombre);
+    if (prof.tienda) setTienda(prof.tienda);
+    if (prof.intencion_30_dias) setIntencion(prof.intencion_30_dias);
+    setError('');
+  };
+
+  // Búsqueda manual forzada en la nube por si Google Sheets tiene registros recientes
+  const handleDeepSearch = async () => {
+    if (!nombre.trim()) {
+      setError('Por favor escribe tu nombre antes de buscar.');
+      return;
+    }
+    setIsSearching(true);
+    setError('');
+    try {
+      const found = await api.fetchParticipantByName(nombre);
+      if (found) {
+        setMatchedProfile(found);
+        setNombre(found.nombre);
+        if (found.tienda) setTienda(found.tienda);
+        if (found.intencion_30_dias) setIntencion(found.intencion_30_dias);
+      } else {
+        setError(`No encontramos registros previos para "${nombre.trim()}". Iniciarás como participante nuevo.`);
+      }
+    } catch (err) {
+      setError('Error al consultar en Google Sheets. Intenta de nuevo.');
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   if (!isOnboardingOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!nombre.trim()) {
       setError('Por favor ingresa tu nombre completo para comenzar.');
@@ -79,7 +197,22 @@ export function OnboardingModal() {
       return;
     }
     setError('');
-    startParticipant(nombre, tienda, intencion);
+
+    let profileToUse = matchedProfile;
+    if (!profileToUse) {
+      profileToUse = findBestProfileMatch(nombre, allProfiles);
+    }
+    if (!profileToUse) {
+      try {
+        setIsSearching(true);
+        profileToUse = await api.fetchParticipantByName(nombre);
+      } catch (err) {
+      } finally {
+        setIsSearching(false);
+      }
+    }
+
+    startParticipant(nombre, tienda, intencion, profileToUse);
   };
 
   const handleLogout = () => {
@@ -89,40 +222,28 @@ export function OnboardingModal() {
       setTienda('');
       setIntencion('');
       setError('');
+      setMatchedProfile(null);
     }
   };
 
   return (
     <div className="modal-overlay onboarding-overlay">
-      {/* Decoración de fondo sobria, elegante e institucional */}
+      {/* Decoración de fondo institucional */}
       <div className="onboarding-bg-decorations" aria-hidden="true">
         <div className="decor-orb decor-orb-1"></div>
         <div className="decor-orb decor-orb-2"></div>
 
         <svg className="decor-svg" viewBox="0 0 1440 900" fill="none" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
-          {/* Círculos concéntricos sutiles inspirados en ondas y gotas */}
           <circle cx="140" cy="180" r="90" stroke="#01606D" strokeWidth="1.2" strokeOpacity="0.1" strokeDasharray="5 5" />
           <circle cx="140" cy="180" r="180" stroke="#01606D" strokeWidth="1.2" strokeOpacity="0.08" />
           <circle cx="140" cy="180" r="280" stroke="#2DCCD3" strokeWidth="1" strokeOpacity="0.12" />
-
-          {/* Círculos y arcos en esquina inferior derecha */}
           <circle cx="1340" cy="760" r="140" stroke="#2DCCD3" strokeWidth="1.5" strokeOpacity="0.14" strokeDasharray="6 6" />
           <circle cx="1340" cy="760" r="250" stroke="#01606D" strokeWidth="1.2" strokeOpacity="0.08" />
           <circle cx="1340" cy="760" r="380" stroke="#2DCCD3" strokeWidth="1" strokeOpacity="0.06" />
-
-          {/* Líneas geométricas curvas y fluidas */}
           <path d="M-60,540 C280,440 460,740 840,620 C1140,520 1340,680 1520,590" stroke="#01606D" strokeWidth="1.5" strokeOpacity="0.08" />
           <path d="M-60,580 C320,480 500,780 880,660 C1180,560 1380,720 1560,630" stroke="#2DCCD3" strokeWidth="1.2" strokeOpacity="0.1" />
-
-          {/* Puntos y gotas sutiles decorativas */}
-          <circle cx="260" cy="340" r="5" fill="#2DCCD3" fillOpacity="0.35" />
-          <circle cx="1180" cy="220" r="7" fill="#01606D" fillOpacity="0.2" />
-          <circle cx="1100" cy="290" r="4" fill="#2DCCD3" fillOpacity="0.4" />
-          <circle cx="1240" cy="460" r="5" fill="#01606D" fillOpacity="0.22" />
-          <circle cx="210" cy="580" r="4" fill="#01606D" fillOpacity="0.25" />
         </svg>
 
-        {/* Sello discreto superior */}
         <div className="decor-pill decor-pill-1">
           <Sparkles size={13} color="var(--turquoise-hover)" />
           <span>Cultura Medipiel</span>
@@ -130,7 +251,7 @@ export function OnboardingModal() {
       </div>
 
       <div className="modal-card">
-        {/* Barra superior del modal: Acceso Admin y botón Cerrar (evita solaparse con el logo en móvil) */}
+        {/* Barra superior del modal */}
         <div className="onboarding-modal-top-bar">
           <button
             type="button"
@@ -160,20 +281,19 @@ export function OnboardingModal() {
         </div>
 
         {/* Modal Header */}
-        <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '16px' }}>
           <img
             src="/medipiel-logo.png"
             alt="Medipiel"
             style={{ height: '42px', width: 'auto', marginBottom: '10px' }}
           />
-          <h2 style={{ fontSize: '1.5rem', color: 'var(--petrol)', marginBottom: '4px' }}>
+          <h2 style={{ fontSize: '1.45rem', color: 'var(--petrol)', marginBottom: '4px' }}>
             {isExistingUser ? 'Mi Perfil Reto 5S' : '¡Bienvenido(a) al Reto 5S!'}
           </h2>
-          <p style={{ color: 'var(--gray-600)', fontSize: '0.88rem', maxWidth: '420px', margin: '0 auto 12px auto', lineHeight: '1.4' }}>
+          <p style={{ color: 'var(--gray-600)', fontSize: '0.86rem', maxWidth: '420px', margin: '0 auto 10px auto', lineHeight: '1.4' }}>
             30 días para vivir nuestra cultura mediante acciones prácticas que se ven, se sienten y se repiten.
           </p>
 
-          {/* Píldora destacada de las 5S integrada en la tarjeta */}
           <div className="modal-5s-banner">
             <span>Ser</span>
             <span className="dot">•</span>
@@ -193,7 +313,7 @@ export function OnboardingModal() {
             color: 'var(--danger)',
             padding: '10px 16px',
             borderRadius: 'var(--radius-sm)',
-            fontSize: '0.88rem',
+            fontSize: '0.86rem',
             marginBottom: '16px',
             fontWeight: 600
           }}>
@@ -204,54 +324,147 @@ export function OnboardingModal() {
         <form onSubmit={handleSubmit}>
           {/* Nombre Completo */}
           <div className="form-group">
-            <label className="form-label" htmlFor="input-nombre">
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                <User size={16} color="var(--petrol)" />
-                Nombre completo:
-              </span>
-              {!isExistingUser && (
-                <small>Si ya habías comenzado, escribe tu nombre para recuperar tu progreso automáticamente.</small>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <label className="form-label" htmlFor="input-nombre" style={{ marginBottom: 0 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <User size={16} color="var(--petrol)" />
+                  Nombre completo:
+                </span>
+              </label>
+
+              {/* Botón de búsqueda rápida en Google Sheets */}
+              {!isExistingUser && normalizedInputName.length >= 2 && !matchedProfile && (
+                <button
+                  type="button"
+                  onClick={handleDeepSearch}
+                  disabled={isSearching}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--turquoise-hover)',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 6px'
+                  }}
+                  title="Buscar avance en Google Sheets"
+                >
+                  {isSearching ? <RefreshCw size={12} className="spin" /> : <Search size={12} />}
+                  <span>{isSearching ? 'Buscando...' : 'Buscar mi avance'}</span>
+                </button>
               )}
-            </label>
-            <input
-              id="input-nombre"
-              type="text"
-              className="form-input"
-              placeholder="Ej. María Camila Gómez"
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              required
-            />
+            </div>
+
+            {!isExistingUser && (
+              <small style={{ display: 'block', color: 'var(--gray-500)', fontSize: '0.78rem', marginBottom: '6px' }}>
+                Copia o escribe tu nombre tal como lo registraste para recuperar tus respuestas y porcentaje de avance.
+              </small>
+            )}
+
+            <div style={{ position: 'relative' }}>
+              <input
+                id="input-nombre"
+                type="text"
+                className="form-input"
+                placeholder="Ej. María Camila Gómez o pega tu nombre..."
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+                required
+                autoComplete="name"
+              />
+              {isLoadingRemoteProfiles && (
+                <span style={{
+                  position: 'absolute',
+                  right: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: '0.72rem',
+                  color: 'var(--gray-400)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <RefreshCw size={12} className="spin" />
+                  <span>Conectando...</span>
+                </span>
+              )}
+            </div>
+
+            {/* Sugerencias interactivas si el usuario escribe su nombre parcial */}
+            {suggestions.length > 0 && !matchedProfile && (
+              <div className="onboarding-suggestions-box">
+                <div className="onboarding-suggestions-header">
+                  <Sparkles size={13} color="var(--turquoise)" />
+                  <span>Encontramos participantes con este nombre (toca el tuyo para cargar tu avance):</span>
+                </div>
+                <div className="onboarding-suggestions-list">
+                  {suggestions.map((s, idx) => (
+                    <button
+                      key={s.participant_id || s.nombre + idx}
+                      type="button"
+                      className="onboarding-suggestion-btn"
+                      onClick={() => handleSelectSuggestion(s)}
+                    >
+                      <div className="suggestion-name-row">
+                        <span className="suggestion-name">{s.nombre}</span>
+                        <span className="suggestion-badge">
+                          {s.porcentaje_avance || 0}% avance
+                        </span>
+                      </div>
+                      <div className="suggestion-sub-row">
+                        <span>📍 {s.tienda || 'Sede Medipiel'}</span>
+                        <span>•</span>
+                        <span>{s.dias_completados?.length || 0} de 30 días completados</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Banner de reconocimiento de progreso previo en tiempo real */}
             {matchedProfile && (
-              <div style={{
-                marginTop: '10px',
-                padding: '12px 14px',
-                background: 'linear-gradient(135deg, rgba(45, 204, 211, 0.14) 0%, rgba(1, 96, 109, 0.08) 100%)',
-                border: '1.5px solid var(--turquoise)',
-                borderRadius: 'var(--radius-md)',
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '10px'
-              }}>
-                <CheckCircle2 size={20} color="var(--petrol)" style={{ flexShrink: 0, marginTop: '2px' }} />
-                <div style={{ fontSize: '0.86rem' }}>
-                  <strong style={{ color: 'var(--petrol)', display: 'block' }}>
-                    ¡Hola de nuevo, {matchedProfile.nombre}!
-                  </strong>
-                  <span style={{ color: 'var(--gray-700)', display: 'block', marginTop: '2px' }}>
-                    Encontramos tu progreso: <strong>{matchedProfile.porcentaje_avance || 0}% de avance</strong> ({matchedProfile.dias_completados?.length || 0} de 30 días completados).
-                  </span>
-                  <span style={{ color: 'var(--gray-500)', fontSize: '0.78rem', display: 'block', marginTop: '4px' }}>
-                    {matchedProfile.tienda ? `Tienda asociada: "${matchedProfile.tienda}". Puedes cambiarla o dejarla igual.` : 'Al continuar recuperarás todas tus respuestas y sellos.'}
+              <div className="matched-profile-banner">
+                <div className="matched-profile-top">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle2 size={22} color="var(--petrol)" style={{ flexShrink: 0 }} />
+                    <div>
+                      <strong className="matched-profile-name">
+                        ¡Hola de nuevo, {matchedProfile.nombre}!
+                      </strong>
+                      <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--gray-600)' }}>
+                        Progreso recuperado exitosamente desde la base de datos
+                      </span>
+                    </div>
+                  </div>
+                  <span className="matched-badge-pill">
+                    {matchedProfile.porcentaje_avance || 0}% AVANCE
                   </span>
                 </div>
+
+                <div className="matched-stats-pills">
+                  <span className="matched-stat-chip">
+                    🏆 <strong>{matchedProfile.porcentaje_avance || 0}%</strong> de avance
+                  </span>
+                  <span className="matched-stat-chip">
+                    📅 <strong>{matchedProfile.dias_completados?.length || 0}</strong> de 30 días completados
+                  </span>
+                  <span className="matched-stat-chip">
+                    📍 {matchedProfile.tienda ? matchedProfile.tienda : 'Sede asignada'}
+                  </span>
+                </div>
+
+                <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--petrol)', fontWeight: 600 }}>
+                  ✓ Tus respuestas, reflexiones y compromisos previos están seguros y listos para continuar.
+                </p>
               </div>
             )}
           </div>
 
-          {/* Tienda / Sede (Campo abierto para copiar/pegar o escribir libremente sin desplegable) */}
+          {/* Tienda / Sede */}
           <div className="form-group">
             <label className="form-label" htmlFor="input-tienda">
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -302,7 +515,9 @@ export function OnboardingModal() {
               {isExistingUser
                 ? 'Guardar y Continuar'
                 : matchedProfile
-                  ? `Continuar mi Reto (${matchedProfile.porcentaje_avance || 0}% de avance)`
+                  ? (Number(matchedProfile.porcentaje_avance || 0) > 0
+                      ? `Continuar mi Reto (${matchedProfile.porcentaje_avance}% de avance)`
+                      : 'Continuar mi Reto 5S')
                   : 'Comenzar mi Reto 5S'}
             </span>
             <ArrowRight size={18} />
@@ -334,8 +549,8 @@ export function OnboardingModal() {
 
         {/* Enlace para Administradores / Líderes */}
         <div style={{
-          marginTop: '20px',
-          paddingTop: '14px',
+          marginTop: '18px',
+          paddingTop: '12px',
           borderTop: '1px dashed var(--gray-200)',
           textAlign: 'center'
         }}>
