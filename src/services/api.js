@@ -138,67 +138,22 @@ export function createEmptyParticipant(nombre = "", tienda = "", intencion = "")
 }
 
 /**
- * Algoritmo inteligente que encuentra el mejor perfil coincidente para un nombre.
- * Resuelve casos donde una persona se registró con o sin segundo nombre o apellido,
- * o si tiene un registro duplicado con 0% y otro con avance previo (rescata el avance).
+ * Algoritmo de coincidencia estricta y segura para recuperación de avance.
+ * Solo vincula y restaura si el nombre ingresado coincide de forma EXACTA
+ * con el registrado previamente (sin adivinanzas ni coincidencias parciales).
+ * Si hay múltiples registros con el mismo nombre, rescata el que tenga mayor avance.
  */
 export function findBestProfileMatch(nombre, profiles) {
   if (!nombre || !Array.isArray(profiles) || profiles.length === 0) return null;
   const norm = normalizeText(nombre);
-  if (!norm || norm.length < 2) return null;
+  if (!norm || norm.length < 3) return null;
 
-  // 1. Coincidencia exacta
+  // Coincidencia EXACTA estricta
   const exactMatches = profiles.filter(p => p && p.nombre && normalizeText(p.nombre) === norm);
   if (exactMatches.length > 0) {
+    // Si hay más de un registro idéntico, tomar el de mayor avance
     exactMatches.sort((a, b) => (Number(b.porcentaje_avance) || 0) - (Number(a.porcentaje_avance) || 0));
-    const bestExact = exactMatches[0];
-
-    // Si el registro exacto tiene 0% de avance, pero hay otro del mismo colaborador con avance
-    if ((Number(bestExact.porcentaje_avance) || 0) === 0 && (!bestExact.dias_completados || bestExact.dias_completados.length === 0)) {
-      const words = norm.split(" ").filter(w => w.length > 2);
-      if (words.length >= 2) {
-        const firstWord = words[0];
-        const lastWord = words[words.length - 1];
-        const candidateWithProgress = profiles.find(p => {
-          if (!p || !p.nombre || p === bestExact) return false;
-          const pNorm = normalizeText(p.nombre);
-          const pWords = pNorm.split(" ").filter(w => w.length > 2);
-          const matchesFirstAndLast = pWords.includes(firstWord) && pWords.includes(lastWord);
-          const hasAdv = (Number(p.porcentaje_avance) || 0) > 0 || (Array.isArray(p.dias_completados) && p.dias_completados.length > 0);
-          return matchesFirstAndLast && hasAdv;
-        });
-
-        if (candidateWithProgress) {
-          return {
-            ...candidateWithProgress,
-            nombre: bestExact.nombre || candidateWithProgress.nombre,
-            tienda: bestExact.tienda || candidateWithProgress.tienda,
-            intencion_30_dias: bestExact.intencion_30_dias || candidateWithProgress.intencion_30_dias,
-            _mergedFrom: candidateWithProgress.nombre
-          };
-        }
-      }
-    }
-    return bestExact;
-  }
-
-  // 2. Coincidencia por primer nombre y apellido
-  const words = norm.split(" ").filter(w => w.length > 2);
-  if (words.length >= 2) {
-    const firstWord = words[0];
-    const lastWord = words[words.length - 1];
-
-    const candidates = profiles.filter(p => {
-      if (!p || !p.nombre) return false;
-      const pNorm = normalizeText(p.nombre);
-      const pWords = pNorm.split(" ").filter(w => w.length > 2);
-      return pWords.includes(firstWord) && pWords.includes(lastWord);
-    });
-
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => (Number(b.porcentaje_avance) || 0) - (Number(a.porcentaje_avance) || 0));
-      return candidates[0];
-    }
+    return exactMatches[0];
   }
 
   return null;
@@ -424,24 +379,17 @@ export const api = {
     const norm = normalizeText(nombre);
     if (!norm) return null;
 
-    // 1. Revisar si ya lo tenemos en memoria
+    // 1. Revisar si ya lo tenemos en memoria por coincidencia exacta
     const inMemory = this.findProfileAnywhere(nombre);
     if (inMemory) return inMemory;
 
-    // 2. Si no, forzar recarga desde Google Sheets
+    // 2. Si no, forzar recarga desde Google Sheets y filtrar por nombre exacto
     const res = await this.fetchParticipantsFromGoogleSheets(true);
     if (res && res.success && Array.isArray(res.participants)) {
-      const exact = res.participants.find(p => p.nombre && normalizeText(p.nombre) === norm);
-      if (exact) return exact;
-
-      // Coincidencia por palabras del nombre
-      const words = norm.split(" ").filter(w => w.length > 2);
-      if (words.length >= 2) {
-        const fuzzy = res.participants.find(p => {
-          const pNorm = normalizeText(p.nombre);
-          return words.every(w => pNorm.includes(w));
-        });
-        if (fuzzy) return fuzzy;
+      const exactMatches = res.participants.filter(p => p.nombre && normalizeText(p.nombre) === norm);
+      if (exactMatches.length > 0) {
+        exactMatches.sort((a, b) => (Number(b.porcentaje_avance) || 0) - (Number(a.porcentaje_avance) || 0));
+        return exactMatches[0];
       }
     }
 

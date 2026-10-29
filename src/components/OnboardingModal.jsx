@@ -122,38 +122,7 @@ export function OnboardingModal() {
     }
   }, [normalizedInputName, allProfiles, isExistingUser]);
 
-  // Sugerencias de colaboradores mientras escribe si hay coincidencias parciales
-  const suggestions = useMemo(() => {
-    if (isExistingUser || !normalizedInputName || normalizedInputName.length < 2) return [];
-    if (matchedProfile && normalizeText(matchedProfile.nombre) === normalizedInputName) return [];
 
-    const queryWords = normalizedInputName.split(" ").filter(Boolean);
-
-    const matches = allProfiles.filter(p => {
-      const pNorm = normalizeText(p.nombre);
-      if (pNorm === normalizedInputName) return false;
-      if (pNorm.includes(normalizedInputName)) return true;
-      return queryWords.every(w => pNorm.includes(w));
-    });
-
-    matches.sort((a, b) => {
-      const advA = Number(a.porcentaje_avance || 0);
-      const advB = Number(b.porcentaje_avance || 0);
-      if (advB !== advA) return advB - advA;
-      return a.nombre.localeCompare(b.nombre);
-    });
-
-    return matches.slice(0, 3);
-  }, [normalizedInputName, allProfiles, matchedProfile, isExistingUser]);
-
-  // Seleccionar una sugerencia
-  const handleSelectSuggestion = (prof) => {
-    setMatchedProfile(prof);
-    setNombre(prof.nombre);
-    if (prof.tienda) setTienda(prof.tienda);
-    if (prof.intencion_30_dias) setIntencion(prof.intencion_30_dias);
-    setError('');
-  };
 
   // Búsqueda manual forzada en la nube por si Google Sheets tiene registros recientes
   const handleDeepSearch = async () => {
@@ -393,37 +362,7 @@ export function OnboardingModal() {
               )}
             </div>
 
-            {/* Sugerencias interactivas si el usuario escribe su nombre parcial */}
-            {suggestions.length > 0 && !matchedProfile && (
-              <div className="onboarding-suggestions-box">
-                <div className="onboarding-suggestions-header">
-                  <Sparkles size={13} color="var(--turquoise)" />
-                  <span>Encontramos participantes con este nombre (toca el tuyo para cargar tu avance):</span>
-                </div>
-                <div className="onboarding-suggestions-list">
-                  {suggestions.map((s, idx) => (
-                    <button
-                      key={s.participant_id || s.nombre + idx}
-                      type="button"
-                      className="onboarding-suggestion-btn"
-                      onClick={() => handleSelectSuggestion(s)}
-                    >
-                      <div className="suggestion-name-row">
-                        <span className="suggestion-name">{s.nombre}</span>
-                        <span className="suggestion-badge">
-                          {s.porcentaje_avance || 0}% avance
-                        </span>
-                      </div>
-                      <div className="suggestion-sub-row">
-                        <span>📍 {s.tienda || 'Sede Medipiel'}</span>
-                        <span>•</span>
-                        <span>{s.dias_completados?.length || 0} de 30 días completados</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+
 
             {/* Banner de reconocimiento de progreso previo en tiempo real */}
             {matchedProfile && (
